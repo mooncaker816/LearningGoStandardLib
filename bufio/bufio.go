@@ -5,6 +5,7 @@
 // Package bufio implements buffered I/O. It wraps an io.Reader or io.Writer
 // object, creating another object (Reader or Writer) that also implements
 // the interface but provides buffering and some help for textual I/O.
+//[Min]bufio包实现了带缓存的输入输出。通过包裹接口io.Reader/io.Writer 来创建新的对象bufio.Reader/Writer,并实现了原有接口，从而实现带缓存的I/O。
 package bufio
 
 import (
@@ -15,7 +16,7 @@ import (
 )
 
 const (
-	defaultBufSize = 4096
+	defaultBufSize = 4096 //[Min]4k
 )
 
 var (
@@ -28,21 +29,25 @@ var (
 // Buffered input.
 
 // Reader implements buffering for an io.Reader object.
+//[Min]新的结构体，所有字段非导出
 type Reader struct {
-	buf          []byte
-	rd           io.Reader // reader provided by the client
-	r, w         int       // buf read and write positions
-	err          error
-	lastByte     int
-	lastRuneSize int
+	buf          []byte     //[Min]存放读取数据的切片缓存
+	rd           io.Reader  // reader provided by the client//[Min]io包中的Reader接口
+	r, w         int        // buf read and write positions//[Min]
+	err          error	//[Min]错误
+	lastByte     int	//[Min]最后一个字节位置
+	lastRuneSize int	//[Min]最后一个UNICODE字符位置
 }
 
-const minReadBufferSize = 16
-const maxConsecutiveEmptyReads = 100
+const minReadBufferSize = 16    //[Min]最小buffer长度
+const maxConsecutiveEmptyReads = 100  //Todo
 
 // NewReaderSize returns a new Reader whose buffer has at least the specified
 // size. If the argument io.Reader is already a Reader with large enough
 // size, it returns the underlying Reader.
+//[Min]工厂函数，用来生成一个指定缓存长度的Reader对象，
+//若长度大于等于16且输入对象已经实现bufio.Reader类型，则返回该接口对应的bufio.Reader类型对象
+//若其他，则返回一个缓存长度至少为16的新bufio.Reader对象
 func NewReaderSize(rd io.Reader, size int) *Reader {
 	// Is it already a Reader?
 	b, ok := rd.(*Reader)
@@ -58,12 +63,14 @@ func NewReaderSize(rd io.Reader, size int) *Reader {
 }
 
 // NewReader returns a new Reader whose buffer has the default size.
+//[Min]工厂函数用来返回一个指定缓存长度为4K的bufio.Reader对象，输入为io.Reader接口对象
 func NewReader(rd io.Reader) *Reader {
 	return NewReaderSize(rd, defaultBufSize)
 }
 
 // Reset discards any buffered data, resets all state, and switches
 // the buffered reader to read from r.
+//[Min]重置bufio.Reader对象，初始化所有bufio.Reader中的状态相关的字段，并切换成新的io.Reader对象，并保留已有buf数据？？//待验证是否保留
 func (b *Reader) Reset(r io.Reader) {
 	b.reset(b.buf, r)
 }
@@ -80,6 +87,7 @@ func (b *Reader) reset(buf []byte, r io.Reader) {
 var errNegativeRead = errors.New("bufio: reader returned negative count from Read")
 
 // fill reads a new chunk into the buffer.
+//[Min]读取当前[r,w)包含的字节并覆盖至缓存头部，记r为0，w为w-r。可以看成[r,w)整体左移至缓存头部并重置状态
 func (b *Reader) fill() {
 	// Slide existing data to beginning.
 	if b.r > 0 {
@@ -109,7 +117,7 @@ func (b *Reader) fill() {
 	}
 	b.err = io.ErrNoProgress
 }
-
+//[Min]置空现有Reader中的err并返回置空前的值
 func (b *Reader) readErr() error {
 	err := b.err
 	b.err = nil
@@ -120,6 +128,8 @@ func (b *Reader) readErr() error {
 // being valid at the next read call. If Peek returns fewer than n bytes, it
 // also returns an error explaining why the read is short. The error is
 // ErrBufferFull if n is larger than b's buffer size.
+//[Min]引用该Reader当前状态下的下n个字节，若剩余字节数小于n,返回剩余字节的slice
+//[Min]注意：Peek只返回引用的字节不读取，下次读取仍接着上次读取的状态，返回的切片数据在下次读取操作之前是有效的（也有可能在下次读取之后仍有效）
 func (b *Reader) Peek(n int) ([]byte, error) {
 	if n < 0 {
 		return nil, ErrNegativeCount
@@ -151,6 +161,7 @@ func (b *Reader) Peek(n int) ([]byte, error) {
 // If Discard skips fewer than n bytes, it also returns an error.
 // If 0 <= n <= b.Buffered(), Discard is guaranteed to succeed without
 // reading from the underlying io.Reader.
+//[Min]跳过n个字节，并返回跳过的字节数
 func (b *Reader) Discard(n int) (discarded int, err error) {
 	if n < 0 {
 		return 0, ErrNegativeCount
@@ -184,6 +195,8 @@ func (b *Reader) Discard(n int) (discarded int, err error) {
 // The bytes are taken from at most one Read on the underlying Reader,
 // hence n may be less than len(p).
 // At EOF, the count will be zero and err will be io.EOF.
+//[Min]一次读取到目标slice p中，若p的长度大于bufio.Reader的长度，则直接读取至p，
+//若p的长度小于bufio.Reader，则先读取至buf再从buf中取出匹配p长度的字节数，并更新当前已读位置和当前缓存最后位置
 func (b *Reader) Read(p []byte) (n int, err error) {
 	n = len(p)
 	if n == 0 {
@@ -230,6 +243,7 @@ func (b *Reader) Read(p []byte) (n int, err error) {
 
 // ReadByte reads and returns a single byte.
 // If no byte is available, returns an error.
+//[Min]读取一个字节并返回，更新缓存中已读位置
 func (b *Reader) ReadByte() (byte, error) {
 	b.lastRuneSize = -1
 	for b.r == b.w {
@@ -245,6 +259,7 @@ func (b *Reader) ReadByte() (byte, error) {
 }
 
 // UnreadByte unreads the last byte. Only the most recently read byte can be unread.
+//[Min]针对ReadByte回退
 func (b *Reader) UnreadByte() error {
 	if b.lastByte < 0 || b.r == 0 && b.w > 0 {
 		return ErrInvalidUnreadByte
@@ -265,6 +280,7 @@ func (b *Reader) UnreadByte() error {
 // ReadRune reads a single UTF-8 encoded Unicode character and returns the
 // rune and its size in bytes. If the encoded rune is invalid, it consumes one byte
 // and returns unicode.ReplacementChar (U+FFFD) with a size of 1.
+//[Min]按unicode字符读取一个字符，若不是则按byte读取一个字节
 func (b *Reader) ReadRune() (r rune, size int, err error) {
 	for b.r+utf8.UTFMax > b.w && !utf8.FullRune(b.buf[b.r:b.w]) && b.err == nil && b.w-b.r < len(b.buf) {
 		b.fill() // b.w-b.r < len(buf) => buffer is not full
@@ -287,6 +303,7 @@ func (b *Reader) ReadRune() (r rune, size int, err error) {
 // the buffer was not a ReadRune, UnreadRune returns an error.  (In this
 // regard it is stricter than UnreadByte, which will unread the last byte
 // from any read operation.)
+//[Min]仅可针对上次read为ReadRune做回退，若上次read为ReadByte则报错，比UnreadByte严格,UnreadByte总是回退一个字节，不管上次是什么read类型
 func (b *Reader) UnreadRune() error {
 	if b.lastRuneSize < 0 || b.r < b.lastRuneSize {
 		return ErrInvalidUnreadRune
@@ -298,6 +315,7 @@ func (b *Reader) UnreadRune() error {
 }
 
 // Buffered returns the number of bytes that can be read from the current buffer.
+//[Min]返回当前buf中未读出的字节数
 func (b *Reader) Buffered() int { return b.w - b.r }
 
 // ReadSlice reads until the first occurrence of delim in the input,
@@ -310,6 +328,7 @@ func (b *Reader) Buffered() int { return b.w - b.r }
 // by the next I/O operation, most clients should use
 // ReadBytes or ReadString instead.
 // ReadSlice returns err != nil if and only if line does not end in delim.
+//[Min]读取分隔符前（包含分隔符）的字节，并返回这些字节在缓存中的引用slice，所以在下次读取操作前这个引用是有效的
 func (b *Reader) ReadSlice(delim byte) (line []byte, err error) {
 	for {
 		// Search buffer.
@@ -363,6 +382,8 @@ func (b *Reader) ReadSlice(delim byte) (line []byte, err error) {
 // Calling UnreadByte after ReadLine will always unread the last byte read
 // (possibly a character belonging to the line end) even if that byte is not
 // part of the line returned by ReadLine.
+//[Min]ReadLine 是特例版的ReadSlice，分隔符为'\n'. 当一次读出的字节数大于等于buf的长度时，只返回buf长度对应的前缀，并设前缀为真，后续字节需再次读取
+//返回的slice自动截去\r\n
 func (b *Reader) ReadLine() (line []byte, isPrefix bool, err error) {
 	line, err = b.ReadSlice('\n')
 	if err == ErrBufferFull {
@@ -405,6 +426,8 @@ func (b *Reader) ReadLine() (line []byte, isPrefix bool, err error) {
 // ReadBytes returns err != nil if and only if the returned data does not end in
 // delim.
 // For simple uses, a Scanner may be more convenient.
+//[Min]通过ReadSlice，读取所有分隔符的数据，返回一个拼接好的拷贝的slice，确保有效性
+//
 func (b *Reader) ReadBytes(delim byte) ([]byte, error) {
 	// Use ReadSlice to look for array,
 	// accumulating full buffers.
@@ -414,7 +437,7 @@ func (b *Reader) ReadBytes(delim byte) ([]byte, error) {
 	for {
 		var e error
 		frag, e = b.ReadSlice(delim)
-		if e == nil { // got final fragment
+		if e == nil { // got final fragment？？？？？？？？？？？？？？？？？？
 			break
 		}
 		if e != ErrBufferFull { // unexpected error
@@ -452,6 +475,7 @@ func (b *Reader) ReadBytes(delim byte) ([]byte, error) {
 // ReadString returns err != nil if and only if the returned data does not end in
 // delim.
 // For simple uses, a Scanner may be more convenient.
+//类似ReadBytes，返回的是string
 func (b *Reader) ReadString(delim byte) (string, error) {
 	bytes, err := b.ReadBytes(delim)
 	return string(bytes), err
