@@ -31,16 +31,16 @@ var (
 // Reader implements buffering for an io.Reader object.
 //[Min]新的结构体，所有字段非导出
 type Reader struct {
-	buf          []byte     //[Min]存放读取数据的切片缓存
-	rd           io.Reader  // reader provided by the client//[Min]io包中的Reader接口
-	r, w         int        // buf read and write positions//[Min]
-	err          error	//[Min]错误
-	lastByte     int	//[Min]最后一个字节位置
-	lastRuneSize int	//[Min]最后一个UNICODE字符位置
+	buf          []byte    //[Min]存放读取数据的切片缓存
+	rd           io.Reader // reader provided by the client//[Min]io包中的Reader接口
+	r, w         int       // buf read and write positions//[Min]Todo
+	err          error     //[Min]错误
+	lastByte     int       //[Min]最后一个字节位置
+	lastRuneSize int       //[Min]最后一个UNICODE字符位置
 }
 
-const minReadBufferSize = 16    //[Min]最小buffer长度
-const maxConsecutiveEmptyReads = 100  //Todo
+const minReadBufferSize = 16         //[Min]最小buffer长度
+const maxConsecutiveEmptyReads = 100 //Todo
 
 // NewReaderSize returns a new Reader whose buffer has at least the specified
 // size. If the argument io.Reader is already a Reader with large enough
@@ -117,6 +117,7 @@ func (b *Reader) fill() {
 	}
 	b.err = io.ErrNoProgress
 }
+
 //[Min]置空现有Reader中的err并返回置空前的值
 func (b *Reader) readErr() error {
 	err := b.err
