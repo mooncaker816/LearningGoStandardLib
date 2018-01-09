@@ -23,27 +23,27 @@ import (
 // position and an error message. The position points to the beginning of
 // the offending token.
 //
-// [Min] 鎵弿鍑洪敊鏃剁殑澶勭悊绋嬪簭锛屽彲浠ュ湪鍒濆鍖栫殑鏃跺€欎紶鍏�
+// [Min] 扫描出错时的处理func，可以为nil
 type ErrorHandler func(pos token.Position, msg string)
 
 // A Scanner holds the scanner's internal state while processing
 // a given text. It can be allocated as part of another data
 // structure but must be initialized via Init before use.
 //
-// [Min] 鎵弿鍣ㄥ彲浠ュ唴宓屽埌鍏朵粬缁撴瀯涓紝璁板綍浜嗘壂鎻忔枃鏈椂鐨勭姸鎬侊紝浣跨敤鍓嶅繀椤诲垵濮嬪寲
+// [Min] 扫描器的状态
 type Scanner struct {
-	// immutable state   [Min] 涓嶅彉鐨勭姸鎬�
-	file *token.File  // source file handle
+	// immutable state   [Min] 不变的状态
+	file *token.File  // source file handle 当前扫描文件的基本信息
 	dir  string       // directory portion of file.Name()
 	src  []byte       // source
 	err  ErrorHandler // error reporting; or nil
 	mode Mode         // scanning mode
 
 	// scanning state
-	ch         rune // current character
-	offset     int  // character offset
-	rdOffset   int  // reading offset (position after current character)
-	lineOffset int  // current line offset
+	ch         rune // current character   [Min] 当前扫描器已读字符
+	offset     int  // character offset  [Min] 当前扫描器已读字符的位置
+	rdOffset   int  // reading offset (position after current character) [Min] 下一扫描字符的位置
+	lineOffset int  // current line offset [Min] 当前扫描行第一个字符的位置
 	insertSemi bool // insert a semicolon before next newline
 
 	// public state - ok to modify
@@ -55,11 +55,11 @@ const bom = 0xFEFF // byte order mark, only permitted as very first character
 // Read the next Unicode char into s.ch.
 // s.ch < 0 means end-of-file.
 //
-// [Min] ch涓鸿鍙栧埌鐨勫瓧绗︼紝rdOffset涓哄皢璇诲瓧绗︾殑浣嶇疆, offset涓�
+// [Min] next()调用之后，ch为当前已读字符，rdOffset为将读字符的起始位置， offset为当前已读字符的起始位置
 func (s *Scanner) next() {
 	if s.rdOffset < len(s.src) {
 		s.offset = s.rdOffset
-		if s.ch == '\n' { //[Min] 濡傛灉涓婁竴涓凡璇诲瓧绗︿负\n,鍒欒褰曚笅褰撳墠琛岀殑璧峰浣嶇疆娣诲姞鍒癴ile鐨勮淇℃伅涓�
+		if s.ch == '\n' { //[Min] 若当前已读字符为换行符，则记录下一行的开始位置，并更新file中的行信息
 			s.lineOffset = s.offset
 			s.file.AddLine(s.offset)
 		}
@@ -76,8 +76,8 @@ func (s *Scanner) next() {
 				s.error(s.offset, "illegal byte order mark")
 			}
 		}
-		s.rdOffset += w //[Min] 鏇存柊涓轰笅涓€涓皢璇诲瓧绗︾殑璧峰浣嶇疆, offset浠嶄负褰撳墠宸茶瀛楃鐨勮捣濮嬩綅缃�
-		s.ch = r        //[Min] 鏇存柊褰撳墠宸茶瀛楃
+		s.rdOffset += w //[Min] 读取完当前字符，rdOffset为下个字符的起始位置, offset仍为当前当前已读字符的起始位置
+		s.ch = r        //[Min] ch为当前已读字符
 	} else {
 		s.offset = len(s.src)
 		if s.ch == '\n' {
@@ -91,7 +91,7 @@ func (s *Scanner) next() {
 // A mode value is a set of flags (or 0).
 // They control scanner behavior.
 //
-//[Min] 鎵弿妯″紡
+//[Min] 扫描模式
 type Mode uint
 
 const (
@@ -114,21 +114,20 @@ const (
 // Note that Init may call err if there is an error in the first character
 // of the file.
 //
-/*[Min] 鍒濆鍖栨壂鎻忓櫒
-闇€浼犲叆涓€涓�*token.File,閲岄潰鍖呭惈浜嗚鎵弿鏂囦欢鍦ㄤ竴涓猣ileset涓殑浣嶇疆淇℃伅锛岄暱搴︿俊鎭瓑,涓嶅寘鍚叿浣撳唴瀹癸紝
-鍙互閫氳繃AddFile杩斿洖璇�*token.File锛�
+/*[Min] 扫描器初始化
+需传入*token.File，File中包含了该扫描文件的基本信息如，size=长度，base=fileset中的起始位置等
+可以通过AddFile将file添加到fileset中，file与fileset均不保存实际内容
 	var fset = token.NewFileSet()
 	var s Scanner
 	s.Init(fset.AddFile("", fset.Base(), len(source)), source, eh, ScanComments|dontInsertSemis)
-	AddFile鍙傛暟渚濇涓猴細鏂囦欢鍚嶏紙鍙互鍖呭惈璺緞锛夛紝褰撳墠fileset涓彲鐢ㄦ渶灏廱ase浣嶇疆锛堝嵆褰撳墠鏂囦欢鍦ㄨfileset涓殑璧峰浣嶇疆锛夛紝
-	褰撳墠鏂囦欢鐨勯暱搴︼紙byte锛�
-src []byte鍗充负褰撳墠鎵弿鏂囦欢鐨勫叿浣撳唴瀹�
-err ErrorHandler涓哄嚭閿欏鐞唂unc锛屽彲浠ヤ负nil
-mode 涓烘壂鎻忔ā寮忥紝鏄惁蹇界暐娉ㄩ噴锛屾槸鍚﹁鏈坊鍔犲垎鍙�
+	AddFile参数依次为：filename, file在当前fileset中最小起始位置，file的实际长度
+src []byte 需扫描的实际内容
+err ErrorHandler 扫描出错时的处理func，可以为nil
+mode 扫描模式，是否扫描注释，是否插入分号
 */
 func (s *Scanner) Init(file *token.File, src []byte, err ErrorHandler, mode Mode) {
 	// Explicitly initialize all fields since a scanner may be reused.
-	if file.Size() != len(src) { //[Min]鎵弿鏂囦欢鐨勫疄闄呴暱搴﹀繀椤诲拰鍦╢ileset涓敞鍐岀殑璇ユ枃浠剁殑闀垮害鐩稿悓
+	if file.Size() != len(src) { //[Min] fileset中记录的该file的长度必须和该file的实际长度一致
 		panic(fmt.Sprintf("file size (%d) does not match src len (%d)", file.Size(), len(src)))
 	}
 	s.file = file
@@ -270,17 +269,17 @@ func (s *Scanner) findLineEnd() bool {
 	return false
 }
 
-//[Min] 妫€鏌ユ槸鍚︽槸瀛楁瘝鎴栬€呬笅鍒掔嚎鎴栬€卽nicode涓畾涔夌殑letter锛屽嵆妫€鏌ユ槸鍚﹀彲浠ョ敤浣渋dentifier
+//[Min] 判断是否为字母，下划线，unicode字母，用来确认是否可以作为identifier
 func isLetter(ch rune) bool {
 	return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || ch == '_' || ch >= utf8.RuneSelf && unicode.IsLetter(ch)
 }
 
-//[Min] 妫€鏌ユ槸鍚︽槸鏁板瓧锛寀nicode涓潪A鐮佺殑鏁板瓧涔熻鍙�
+//[Min] 判断字符是否是数字
 func isDigit(ch rune) bool {
 	return '0' <= ch && ch <= '9' || ch >= utf8.RuneSelf && unicode.IsDigit(ch)
 }
 
-//[Min] 鎵弿鍚庣画瀛楃鐩村埌涓嶆槸鏁板瓧鎴栧瓧姣嶏紝杩斿洖鎵€鎵弿鐨勫瓧绗︿覆鍗充负identifier鐨勫€�
+//[Min] 扫描identifier，直到字符不为字母或数字，返回所扫描的identifier的值
 func (s *Scanner) scanIdentifier() string {
 	offs := s.offset
 	for isLetter(s.ch) || isDigit(s.ch) {
@@ -289,7 +288,7 @@ func (s *Scanner) scanIdentifier() string {
 	return string(s.src[offs:s.offset])
 }
 
-// [Min] 璁℃暟鏁板瓧鐨勫疄闄呭崄杩涘埗鍊�
+// [Min] 计算数字的十进制值
 func digitVal(ch rune) int {
 	switch {
 	case '0' <= ch && ch <= '9':
@@ -302,14 +301,14 @@ func digitVal(ch rune) int {
 	return 16 // larger than any legal digit val
 }
 
-// [Min] 鍦ㄨ杩涘埗鐨勯檺鍒朵笅锛屾壂鎻忓畬鍚庣画灏炬暟
+// [Min] 根据进制扫描数字的尾数
 func (s *Scanner) scanMantissa(base int) {
 	for digitVal(s.ch) < base {
 		s.next()
 	}
 }
 
-// [Min] 鎵弿鏁板瓧 鍖哄垎灏忔暟锛屾暣鏁帮紝绉戝璁℃暟鎵弿锛岃繑鍥炴暟鍊肩殑string褰㈠紡
+// [Min] 扫描数各种合法的数，返回token类型和token值
 func (s *Scanner) scanNumber(seenDecimalPoint bool) (token.Token, string) {
 	// digitVal(s.ch) < 10
 	offs := s.offset
@@ -322,7 +321,7 @@ func (s *Scanner) scanNumber(seenDecimalPoint bool) (token.Token, string) {
 		goto exponent
 	}
 
-	if s.ch == '0' { // [Min] 绗竴浣嶆槸0,鍙兘鏄�16杩涘埗鏁存暟0x,0X,鎴栬€�8杩涘埗鏁存暟0锛屾垨鑰呮槸鍗佽繘鍒舵暣鏁板皬鏁�
+	if s.ch == '0' { // [Min] 起始为0,依次检查是否为16进制，8进制，10进制
 		// int or float
 		offs := s.offset
 		s.next()
@@ -391,7 +390,7 @@ exit:
 // escaped quote. In case of a syntax error, it stops at the offending
 // character (without consuming it) and returns false. Otherwise
 // it returns true.
-// [Min] 杞箟鎵弿锛屽拰text/scanner 涓€鑷达紝姝ｅ父杩斿洖鏃跺凡鎵弿浜嗕笅涓€瀛楃
+// [Min] 扫描转义字符，和text/scanner一致，扫描无错返回时，已读取下一字符
 func (s *Scanner) scanEscape(quote rune) bool {
 	offs := s.offset
 
@@ -445,7 +444,7 @@ func (s *Scanner) scanEscape(quote rune) bool {
 	return true
 }
 
-// [Min] 鎵弿鍗曚釜unicode瀛楃 ''
+// [Min] 扫描单个字符，返回字符串带单引号
 func (s *Scanner) scanRune() string {
 	// '\'' opening already consumed
 	offs := s.offset - 1
@@ -479,10 +478,10 @@ func (s *Scanner) scanRune() string {
 		s.error(offs, "illegal rune literal")
 	}
 
-	return string(s.src[offs:s.offset]) // 杩斿洖鐨勬槸"'x'",瀛楃涓插寘鍚�''
+	return string(s.src[offs:s.offset]) // [Min] 有效返回单字符token值:'x'
 }
 
-// [Min] 鎵弿瀛楃涓�
+// [Min] 扫描字符串，返回值带双引号
 func (s *Scanner) scanString() string {
 	// '"' opening already consumed
 	offs := s.offset - 1
@@ -505,7 +504,7 @@ func (s *Scanner) scanString() string {
 	return string(s.src[offs:s.offset])
 }
 
-// [Min] 鍘绘帀鍏冩暟鎹腑鐨刓r
+// [Min] 扫描元数据的时候跳过\r
 func stripCR(b []byte) []byte {
 	c := make([]byte, len(b))
 	i := 0
@@ -518,7 +517,7 @@ func stripCR(b []byte) []byte {
 	return c[:i]
 }
 
-// [Min] 鎵弿鍏冩暟鎹�
+// [Min] 扫描元数据，返回值带反引号
 func (s *Scanner) scanRawString() string {
 	// '`' opening already consumed
 	offs := s.offset - 1
@@ -547,7 +546,7 @@ func (s *Scanner) scanRawString() string {
 	return string(lit)
 }
 
-//[Min] 璺宠繃whitespace锛屽鏋滄槸鎹㈣绗︿笖闇€瑕佽嚜鍔ㄦ彃鍏�;锛屽垯涓嶈烦杩囧綋鍓嶅瓧绗�
+//[Min] 跳过whitespace，若字符为\n且自动插入分号，则不跳过\n
 func (s *Scanner) skipWhitespace() {
 	for s.ch == ' ' || s.ch == '\t' || s.ch == '\n' && !s.insertSemi || s.ch == '\r' {
 		s.next()
@@ -631,17 +630,17 @@ func (s *Scanner) Scan() (pos token.Pos, tok token.Token, lit string) {
 scanAgain:
 	s.skipWhitespace()
 
-	// current token start [Min] 鍦╢ileset涓殑缁濆浣嶇疆鍗� base + offset
+	// current token start [Min] pos为fileset中的绝对起始位置，即base + offset
 	pos = s.file.Pos(s.offset)
 
 	// determine token value
 	insertSemi := false
 	switch ch := s.ch; {
 	case isLetter(ch):
-		lit = s.scanIdentifier() //[Min] 濡傛灉鏄瓧绗︼紝鍒欐鏌ユ槸鍚︼拷锟斤拷identifier
+		lit = s.scanIdentifier() //[Min] 若当前字符可以当做identifier的起始字符，则开始indentifier扫描
 		if len(lit) > 1 {
 			// keywords are longer than one letter - avoid lookup otherwise
-			tok = token.Lookup(lit) // 妫€鏌ユ槸鍚︼拷锟藉叧閿瓧锛屼笉鏄殑璇濆氨鏄痠dentifier
+			tok = token.Lookup(lit) // [Min] 是否为keyword，不是则认为是identifier
 			switch tok {
 			case token.IDENT, token.BREAK, token.CONTINUE, token.FALLTHROUGH, token.RETURN:
 				insertSemi = true
@@ -650,7 +649,7 @@ scanAgain:
 			insertSemi = true
 			tok = token.IDENT
 		}
-	case '0' <= ch && ch <= '9': // [Min]鎵弿鏁板瓧
+	case '0' <= ch && ch <= '9': // [Min] 数字则进行数扫描
 		insertSemi = true
 		tok, lit = s.scanNumber(false)
 	default:
