@@ -222,7 +222,7 @@ func (s *Scanner) Init(src io.Reader) *Scanner {
 // that only a minimal amount of work needs to be done in the common ASCII
 // case (one test to check for both ASCII and end-of-buffer, and one test
 // to check for newlines).
-// [Min] 若当前srcBuf在最后的utf8正好被截断，则会以截断部分开启���一次srcBuf的处理
+// [Min] 若当前srcBuf在最后的utf8正好被截断，则会以截断部分开启������一次srcBuf的处理
 func (s *Scanner) next() rune {
 	ch, width := rune(s.srcBuf[s.srcPos]), 1
 
@@ -501,7 +501,7 @@ func (s *Scanner) scanEscape(quote rune) rune {
 	return ch
 }
 
-// [Min] 扫描""之间的字符，当前字符指向后"号，并返回string中字符个数
+// [Min] 扫描""之间的字符，当前字符指向后"号，���������string中字符个数
 func (s *Scanner) scanString(quote rune) (n int) {
 	ch := s.next() // read character after quote
 	for ch != quote {
@@ -651,7 +651,7 @@ redo:
 				if s.Mode&SkipComments != 0 {
 					s.tokPos = -1 // don't collect token text
 					ch = s.scanComment(ch)
-					goto redo
+					goto redo // [Min] 若skipcomment则不记录token，并直接开启下一个token的扫描
 				}
 				ch = s.scanComment(ch)
 				tok = Comment
