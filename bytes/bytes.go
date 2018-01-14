@@ -26,7 +26,7 @@ func equalPortable(a, b []byte) bool {
 
 // explode splits s into a slice of UTF-8 sequences, one per Unicode code point (still slices of bytes),
 // up to a maximum of n byte slices. Invalid UTF-8 sequences are chopped into individual bytes.
-// [Min] 将s中前n个utf8码分别存储到当个slice中（无效的utf8码按单个字节存储），最后返回这些slice的slice
+// [Min] 以每个utf8字符为单位，将前n个字符对应的[]byte型组成新的slice返回
 func explode(s []byte, n int) [][]byte {
 	if n <= 0 {
 		n = len(s)
@@ -73,7 +73,7 @@ func Contains(b, subslice []byte) bool {
 }
 
 // ContainsAny reports whether any of the UTF-8-encoded code points in chars are within b.
-// [Min] b中是否含有字符串chars
+// [Min] b中是否含有字符串chars中的任意一个unicode字符
 func ContainsAny(b []byte, chars string) bool {
 	return IndexAny(b, chars) >= 0
 }
@@ -127,7 +127,7 @@ func LastIndexByte(s []byte, c byte) int {
 // If r is utf8.RuneError, it returns the first instance of any
 // invalid UTF-8 byte sequence.
 /* [Min]
-返回第一个r的位置，如果r无法解码为utf8，则返回-1，没找到也返回-1
+返回第一个r的位置，如果r无法解码为utf8又不是\uFFFD，认为没找到返回-1
 */
 func IndexRune(s []byte, r rune) int {
 	switch {
@@ -155,7 +155,7 @@ func IndexRune(s []byte, r rune) int {
 // It returns the byte index of the first occurrence in s of any of the Unicode
 // code points in chars. It returns -1 if chars is empty or if there is no code
 // point in common.
-// [Min] 返回一个chars的位置
+// [Min] 返回chars中任意一个unicode字符在s中第一次出现的位置
 func IndexAny(s []byte, chars string) int {
 	if chars == "" {
 		// Avoid scanning all of s.
@@ -192,7 +192,7 @@ func IndexAny(s []byte, chars string) int {
 // points. It returns the byte index of the last occurrence in s of any of
 // the Unicode code points in chars. It returns -1 if chars is empty or if
 // there is no code point in common.
-// [Min] 返回最后一个chars的位置
+// [Min] 返回chars中任意一个unicode字符在s中最后一次出现的位置
 func LastIndexAny(s []byte, chars string) int {
 	if chars == "" {
 		// Avoid scanning all of s.
@@ -222,7 +222,7 @@ func LastIndexAny(s []byte, chars string) int {
 
 // Generic split: splits after each instance of sep,
 // including sepSave bytes of sep in the subslices.
-// [Min] 按sep划分s，返回前n个组成的slice，每个slice中sep的保留位数有sepSave决定，n小于0时，返回所有划分
+// [Min] 按sep划分s，返回前n个组成的slice，每个slice中sep的保留位数有sepSave决定，n小于0时，返回所有划分组成的slice
 func genSplit(s, sep []byte, sepSave, n int) [][]byte {
 	if n == 0 {
 		return nil
@@ -257,7 +257,7 @@ func genSplit(s, sep []byte, sepSave, n int) [][]byte {
 //   n > 0: at most n subslices; the last subslice will be the unsplit remainder.
 //   n == 0: the result is nil (zero subslices)
 //   n < 0: all subslices
-// [Min] 按sep划分s，返回前n个划分的slice组成的slice，每个划分的slice不包含sep
+// [Min] 按sep划分s，返回前n个划分的slice组成的slice，每个划分的slice不包含sep，n小于0返回所有划分组成的slice
 func SplitN(s, sep []byte, n int) [][]byte { return genSplit(s, sep, 0, n) }
 
 // SplitAfterN slices s into subslices after each instance of sep and
@@ -530,7 +530,11 @@ func ToTitleSpecial(c unicode.SpecialCase, s []byte) []byte {
 
 // isSeparator reports whether the rune could mark a word boundary.
 // TODO: update when package unicode captures more of the properties.
-// [Min] r是否可以作为一个词（unicode）的分隔符
+/* [Min]
+r是否可以作为一个词（unicode）的分隔符
+ascii码，数字，字母，下划线不可以
+非ascii码，unicode的数字，字母不可以，剩下其他认为是unicode的space可以
+*/
 func isSeparator(r rune) bool {
 	// ASCII alphanumerics and underscore are not separators
 	if r <= 0x7F {
@@ -558,7 +562,7 @@ func isSeparator(r rune) bool {
 // words mapped to their title case.
 //
 // BUG(rsc): The rule Title uses for word boundaries does not handle Unicode punctuation properly.
-// [Min] 调用Map，s中非词分隔符的转换为Title
+// [Min] 调用Map，s中非词分隔符的字符转换为Title
 func Title(s []byte) []byte {
 	// Use a closure here to remember state.
 	// Hackish but effective. Depends on Map scanning in order and calling
@@ -603,7 +607,7 @@ func TrimRightFunc(s []byte, f func(r rune) bool) []byte {
 
 // TrimFunc returns a subslice of s by slicing off all leading and trailing
 // UTF-8-encoded code points c that satisfy f(c).
-// [Min] 去掉左右所有连续满足f的部分后剩下的子slice
+// [Min] 去掉左边和去掉右边的结合体
 func TrimFunc(s []byte, f func(r rune) bool) []byte {
 	return TrimRightFunc(TrimLeftFunc(s, f), f)
 }
@@ -631,7 +635,7 @@ func TrimSuffix(s, suffix []byte) []byte {
 // IndexFunc interprets s as a sequence of UTF-8-encoded code points.
 // It returns the byte index in s of the first Unicode
 // code point satisfying f(c), or -1 if none do.
-// [Min] 返回s中第一个满足f的utf8码的起始位置
+// [Min] 返回s中第一个满足f的rune字符对应的utf8码的起始位置
 func IndexFunc(s []byte, f func(r rune) bool) int {
 	return indexFunc(s, f, true)
 }
@@ -639,7 +643,7 @@ func IndexFunc(s []byte, f func(r rune) bool) int {
 // LastIndexFunc interprets s as a sequence of UTF-8-encoded code points.
 // It returns the byte index in s of the last Unicode
 // code point satisfying f(c), or -1 if none do.
-// [Min] 返回s中最后一个满足f的utf8码的起始位置
+// [Min] 返回s中最后一个满足f的rune字符对应的utf8码的起始位置
 func LastIndexFunc(s []byte, f func(r rune) bool) int {
 	return lastIndexFunc(s, f, true)
 }
@@ -647,7 +651,7 @@ func LastIndexFunc(s []byte, f func(r rune) bool) int {
 // indexFunc is the same as IndexFunc except that if
 // truth==false, the sense of the predicate function is
 // inverted.
-// [Min] 返回s中第一个在f作用下得到truth的utf8码的起始位置
+// [Min] 返回s中第一个在f作用下得到truth的rune字符对应的utf8码的起始位置
 func indexFunc(s []byte, f func(r rune) bool, truth bool) int {
 	start := 0
 	for start < len(s) {
@@ -667,7 +671,7 @@ func indexFunc(s []byte, f func(r rune) bool, truth bool) int {
 // lastIndexFunc is the same as LastIndexFunc except that if
 // truth==false, the sense of the predicate function is
 // inverted.
-// [Min] 返回s中最后一个在f作用下得到truth的utf8码的起始位置
+// [Min] 返回s中最后一个在f作用下得到truth的rune字符对应的utf8码的起始位置
 func lastIndexFunc(s []byte, f func(r rune) bool, truth bool) int {
 	for i := len(s); i > 0; {
 		r, size := rune(s[i-1]), 1
@@ -692,7 +696,16 @@ type asciiSet [8]uint32
 
 // makeASCIISet creates a set of ASCII characters and reports whether all
 // characters in chars are ASCII.
-// [Min] 返回s中碰到非ascii码之前所有ascii码的集合，以及s中是否都是ascii码
+/* [Min]
+返回s中碰到非ascii码之前所有ascii码的集合，以及s中是否都是ascii码
+可以把asciiSet看成是一个32字节长度的值，其中低16字节共计128位表达128个ascii码[0,127]，高16字节用来比对非ascii码
+具体存储：
+asciiSet是一个含有8个元素的数组，每个元素有32位，共计256位，
+其中元素的位置保存了该字符（uint8）对应的高3位（c>>5）的信息，
+元素的内容保存了每个字符低5位（1<<uint(c&31)）的信息，5位最大是31（11111），
+刚好uint32的每一位可以代表在相同高3位的情况下，所有字符的低5位情况，
+这样就可以用数组的前4个元素完整表达128个ascii了
+*/
 func makeASCIISet(chars string) (as asciiSet, ok bool) {
 	for i := 0; i < len(chars); i++ {
 		c := chars[i]
@@ -712,7 +725,7 @@ func (as *asciiSet) contains(c byte) bool {
 
 /* [Min]
 返回一个判断r是否在cutset字符串中的函数
-若为单字节字符串，则直接比较r是否和cutset相同
+若为单字节字符串，则返回一个直接比较r是否和cutset相同的函数
 根据cutset创建一个ascii码的集合，
 如果全是ascii，则返回一个用来判断r是否在上述集合中的函数
 如果含有非ascii，则返回一个逐一循环cutset中rune字符，判断r是否其中之一的函数
@@ -881,6 +894,7 @@ func EqualFold(s, t []byte) bool {
 }
 
 /* [Min]
+返回第一个sep在s中的位置
 Rabin-Karp字符串匹配算法和前面介绍的《朴素字符串匹配算法》类似，也是对应每一个字符进行比较，不同的是Rabin-Karp采用了把字符进行预处理，也就是对每个字符进行对应进制数并取模运算，类似于通过某种函数计算其函数值，比较的是每个字符的函数值。预处理时间O(m)，匹配时间是O((n-m+1)m)。
 
 Rabin-Karp算法的思想：
