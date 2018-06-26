@@ -407,6 +407,14 @@ func walk(path string, info os.FileInfo, walkFn WalkFunc) error {
 // order, which makes the output deterministic but means that for very
 // large directories Walk can be inefficient.
 // Walk does not follow symbolic links.
+/* [Min]
+// 文件处理函数定义如下，如果 WalkFunc 返回 nil，则 Walk 函数继续
+// 遍历，如果返回 SkipDir，则 Walk 函数会跳过当前目录（如果当前遍
+// 历到的是文件，则同时跳过后续文件及子目录），继续遍历下一个目录。
+// 如果返回其它错误，则 Walk 函数会中止遍历过程。
+// 在 Walk 遍历过程中，如果遇到错误，则会将错误通过 err 传递给
+// WalkFunc 函数，同时 Walk 会跳过出错的项目，继续处理后续项目。
+*/
 func Walk(root string, walkFn WalkFunc) error {
 	info, err := os.Lstat(root)
 	if err != nil {
