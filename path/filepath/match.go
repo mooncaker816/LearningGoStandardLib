@@ -41,6 +41,7 @@ var ErrBadPattern = errors.New("syntax error in pattern")
 // On Windows, escaping is disabled. Instead, '\\' is treated as
 // path separator.
 //
+// [Min] 同path.Match
 func Match(pattern, name string) (matched bool, err error) {
 Pattern:
 	for len(pattern) > 0 {
@@ -231,6 +232,7 @@ func getEsc(chunk string) (r rune, nchunk string, err error) {
 // Glob ignores file system errors such as I/O errors reading directories.
 // The only possible returned error is ErrBadPattern, when pattern
 // is malformed.
+// [Min] 列出与指定的模式 pattern 完全匹配的文件或目录（匹配原则同Match）
 func Glob(pattern string) (matches []string, err error) {
 	if !hasMeta(pattern) {
 		if _, err = os.Lstat(pattern); err != nil {

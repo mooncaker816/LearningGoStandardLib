@@ -9,6 +9,7 @@ package filepath
 import "strings"
 
 // IsAbs reports whether the path is absolute.
+// [Min] 判断是否为绝对路径，即以/开头
 func IsAbs(path string) bool {
 	return strings.HasPrefix(path, "/")
 }

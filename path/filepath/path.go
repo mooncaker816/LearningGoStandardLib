@@ -85,6 +85,7 @@ const (
 // See also Rob Pike, ``Lexical File Names in Plan 9 or
 // Getting Dot-Dot Right,''
 // https://9p.io/sys/doc/lexnames.html
+// [Min] 对路径格式化
 func Clean(path string) string {
 	originalPath := path
 	volLen := volumeNameLen(path)
@@ -162,6 +163,7 @@ func Clean(path string) string {
 // ToSlash returns the result of replacing each separator character
 // in path with a slash ('/') character. Multiple separators are
 // replaced by multiple slashes.
+// [Min] 将路径中的分隔符替换为/
 func ToSlash(path string) string {
 	if Separator == '/' {
 		return path
@@ -172,6 +174,7 @@ func ToSlash(path string) string {
 // FromSlash returns the result of replacing each slash ('/') character
 // in path with a separator character. Multiple slashes are replaced
 // by multiple separators.
+// [Min] 将路径中的/分隔符替换为系统对应的分隔符
 func FromSlash(path string) string {
 	if Separator == '/' {
 		return path
@@ -183,6 +186,8 @@ func FromSlash(path string) string {
 // usually found in PATH or GOPATH environment variables.
 // Unlike strings.Split, SplitList returns an empty slice when passed an empty
 // string.
+// [Min] 根据系统的 List分隔符（如PATH 中包含的多个路径之间的: ;）,将List路径拆分成单个路径组成的 slice
+// [Min] 若 list 路径为空，则返回空 slice
 func SplitList(path string) []string {
 	return splitList(path)
 }
@@ -192,6 +197,7 @@ func SplitList(path string) []string {
 // If there is no Separator in path, Split returns an empty dir
 // and file set to path.
 // The returned values have the property that path = dir+file.
+// [Min] 拆分路径为目录+文件名
 func Split(path string) (dir, file string) {
 	vol := VolumeName(path)
 	i := len(path) - 1
@@ -206,6 +212,7 @@ func Split(path string) (dir, file string) {
 // all empty strings are ignored.
 // On Windows, the result is a UNC path if and only if the first path
 // element is a UNC path.
+// [Min] 拼接路径
 func Join(elem ...string) string {
 	return join(elem)
 }
@@ -214,6 +221,7 @@ func Join(elem ...string) string {
 // The extension is the suffix beginning at the final dot
 // in the final element of path; it is empty if there is
 // no dot.
+// [Min] 根据最后一个元素中的最后一个.返回路径中文件的扩展名，若没有.，返回空
 func Ext(path string) string {
 	for i := len(path) - 1; i >= 0 && !os.IsPathSeparator(path[i]); i-- {
 		if path[i] == '.' {
@@ -228,6 +236,7 @@ func Ext(path string) string {
 // If path is relative the result will be relative to the current directory,
 // unless one of the components is an absolute symbolic link.
 // EvalSymlinks calls Clean on the result.
+// [Min] 对 symlink 文件解引用，并对结果路径格式化
 func EvalSymlinks(path string) (string, error) {
 	return evalSymlinks(path)
 }
@@ -237,6 +246,7 @@ func EvalSymlinks(path string) (string, error) {
 // working directory to turn it into an absolute path. The absolute
 // path name for a given file is not guaranteed to be unique.
 // Abs calls Clean on the result.
+// [Min] 返回绝对路径并格式化，如果给定的路径不是绝对路径，则会加上当前目录形成绝对路径
 func Abs(path string) (string, error) {
 	return abs(path)
 }
@@ -260,6 +270,8 @@ func unixAbs(path string) (string, error) {
 // An error is returned if targpath can't be made relative to basepath or if
 // knowing the current working directory would be necessary to compute it.
 // Rel calls Clean on the result.
+// [Min] 根据 basepath 将 targpath 以相对路径的方式返回，并格式化
+// [Min] 例如： Rel("/a/b","/a/b/c/test.go") => c/test.go
 func Rel(basepath, targpath string) (string, error) {
 	baseVol := VolumeName(basepath)
 	targVol := VolumeName(targpath)
@@ -428,6 +440,7 @@ func readDirNames(dirname string) ([]string, error) {
 // Trailing path separators are removed before extracting the last element.
 // If the path is empty, Base returns ".".
 // If the path consists entirely of separators, Base returns a single separator.
+// [Min] 返回最后一个元素，如果路径为空，则返回.，如果路径全是分隔符，则返回单个分隔符
 func Base(path string) string {
 	if path == "" {
 		return "."
@@ -459,6 +472,7 @@ func Base(path string) string {
 // If the path is empty, Dir returns ".".
 // If the path consists entirely of separators, Dir returns a single separator.
 // The returned path does not end in a separator unless it is the root directory.
+// [Min] 返回除去最后一个元素的路径，并格式化。如果路径为空，返回.，如果路径全是分隔符，返回单个分隔符，返回的路径不以分隔符结尾，除非该路径为根目录
 func Dir(path string) string {
 	vol := VolumeName(path)
 	i := len(path) - 1
@@ -477,6 +491,7 @@ func Dir(path string) string {
 // Given "C:\foo\bar" it returns "C:" on Windows.
 // Given "\\host\share\foo" it returns "\\host\share".
 // On other platforms it returns "".
+// [Min] Windows系统返回卷名，其他系统返回空
 func VolumeName(path string) string {
 	return path[:volumeNameLen(path)]
 }
