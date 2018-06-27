@@ -99,6 +99,8 @@ func Search(n int, f func(int) bool) int {
 // not present (it could be len(a)).
 // The slice must be sorted in ascending order.
 //
+// [Min] 在已按升序排序的数组 a 中查找 x，
+// [Min] 若 x 存在，则返回 x 的索引，若 x 不存在，则返回 x 插入 a 时对应的索引
 func SearchInts(a []int, x int) int {
 	return Search(len(a), func(i int) bool { return a[i] >= x })
 }
@@ -108,6 +110,7 @@ func SearchInts(a []int, x int) int {
 // present (it could be len(a)).
 // The slice must be sorted in ascending order.
 //
+// [Min] 同SearchInts
 func SearchFloat64s(a []float64, x float64) int {
 	return Search(len(a), func(i int) bool { return a[i] >= x })
 }
@@ -117,15 +120,19 @@ func SearchFloat64s(a []float64, x float64) int {
 // present (it could be len(a)).
 // The slice must be sorted in ascending order.
 //
+// [Min] 同SearchInts
 func SearchStrings(a []string, x string) int {
 	return Search(len(a), func(i int) bool { return a[i] >= x })
 }
 
 // Search returns the result of applying SearchInts to the receiver and x.
+// [Min] 在已排序的IntSlice中查找 x
 func (p IntSlice) Search(x int) int { return SearchInts(p, x) }
 
 // Search returns the result of applying SearchFloat64s to the receiver and x.
+// [Min] 在已排序的Float64Slice中查找 x
 func (p Float64Slice) Search(x float64) int { return SearchFloat64s(p, x) }
 
 // Search returns the result of applying SearchStrings to the receiver and x.
+// [Min] 在已排序的StringSlice中查找 x
 func (p StringSlice) Search(x string) int { return SearchStrings(p, x) }
