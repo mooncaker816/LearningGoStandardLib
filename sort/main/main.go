@@ -10,7 +10,7 @@ type record struct {
 	ch, math, en, total int
 }
 
-type lessFn func(r1, r2 *record) bool
+type lessFn func(r1, r2 *record) int // -1,0,1
 
 type recordSorter struct {
 	recs []record
@@ -28,10 +28,10 @@ func (r *recordSorter) Swap(i, j int) {
 func (r *recordSorter) Less(i, j int) bool {
 	vi, vj := r.recs[i], r.recs[j]
 	for _, less := range r.less {
-		if less(&vi, &vj) {
+		switch less(&vi, &vj) {
+		case -1:
 			return true
-		}
-		if less(&vj, &vi) {
+		case 1:
 			return false
 		}
 		// vi = vj, check next less func
@@ -60,17 +60,51 @@ func OrderBy(less ...lessFn) *recordSorter {
 }
 
 func main() {
-	desBych := func(r1, r2 *record) bool {
-		return r1.ch > r2.ch
+	desBych := func(r1, r2 *record) int {
+		if r1.ch > r2.ch {
+			return -1
+		}
+		if r1.ch < r2.ch {
+			return 1
+		}
+		return 0
 	}
-	desBymath := func(r1, r2 *record) bool {
-		return r1.math > r2.math
+	incBych := func(r1, r2 *record) int {
+		if r1.ch > r2.ch {
+			return 1
+		}
+		if r1.ch < r2.ch {
+			return -1
+		}
+		return 0
 	}
-	desByen := func(r1, r2 *record) bool {
-		return r1.en > r2.en
+	_ = incBych
+	desBymath := func(r1, r2 *record) int {
+		if r1.math > r2.math {
+			return -1
+		}
+		if r1.math < r2.math {
+			return 1
+		}
+		return 0
 	}
-	desBytotal := func(r1, r2 *record) bool {
-		return r1.total > r2.total
+	desByen := func(r1, r2 *record) int {
+		if r1.en > r2.en {
+			return -1
+		}
+		if r1.en < r2.en {
+			return 1
+		}
+		return 0
+	}
+	desBytotal := func(r1, r2 *record) int {
+		if r1.total > r2.total {
+			return -1
+		}
+		if r1.total < r2.total {
+			return 1
+		}
+		return 0
 	}
 	OrderBy(desBytotal, desBych, desBymath, desByen).Sort(tt)
 	fmt.Println("sortedBy total,ch,math,en:")
