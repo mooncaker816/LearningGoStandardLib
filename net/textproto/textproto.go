@@ -116,7 +116,7 @@ func Dial(network, addr string) (*Conn, error) {
 // [Min] 通过 Conn 发送命令
 func (c *Conn) Cmd(format string, args ...interface{}) (id uint, err error) {
 	id = c.Next()
-	c.StartRequest(id)
+	c.StartRequest(id) // [Min] 若 id 和当前应该按顺序处理的 id 不同，会阻塞 id，直至 id-1向 id 发送消息
 	err = c.PrintfLine(format, args...)
 	c.EndRequest(id)
 	if err != nil {
