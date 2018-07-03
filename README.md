@@ -7,6 +7,7 @@
 | encoding/hex   |  Yes     |2018-06-25 |
 | go/scanner     |  Yes     |2018-01-09 |
 | go/token       |  Yes     |2018-01-23 |
+| net/textproto  |  Yes     |2018-07-03 |
 | net/url        |  Yes     |2018-06-28 |
 | path           |  Yes     |2018-06-26 |
 | path/filepath  |  Yes     |2018-06-26 |
