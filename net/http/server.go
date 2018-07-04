@@ -79,6 +79,12 @@ var (
 // RST_STREAM, depending on the HTTP protocol. To abort a handler so
 // the client sees an interrupted response but the server doesn't log
 // an error, panic with the value ErrAbortHandler.
+/* [Min]
+根据客户端软件，HTTP 协议版本，以及客户端和服务器中间的介质的不同，
+很有可能在完成写入ResponseWriter之后无法再读取Request.Body，
+保险起见，先读取Request.Body再返回
+handler 不能修改 request，只能读取 request
+*/
 type Handler interface {
 	ServeHTTP(ResponseWriter, *Request)
 }
@@ -88,6 +94,9 @@ type Handler interface {
 //
 // A ResponseWriter may not be used after the Handler.ServeHTTP method
 // has returned.
+/* [Min]
+ResponseWriter 是对HTTP 服务的响应，在Handler.ServeHTTP 返回后，ResponseWriter可能不可用
+*/
 type ResponseWriter interface {
 	// Header returns the header map that will be sent by
 	// WriteHeader. The Header map also is the mechanism with which
@@ -145,6 +154,7 @@ type ResponseWriter interface {
 	// support sending user-defined 1xx informational headers,
 	// with the exception of 100-continue response header that the
 	// Server sends automatically when the Request.Body is read.
+	// [Min] 显示的调用WriteHeader一般用于发送错误返回
 	WriteHeader(statusCode int)
 }
 
@@ -159,6 +169,7 @@ type ResponseWriter interface {
 // if the client is connected through an HTTP proxy,
 // the buffered data may not reach the client until the response
 // completes.
+// [Min] Flusher 用于将缓存中的数据发送给客户端
 type Flusher interface {
 	// Flush sends any buffered data to the client.
 	Flush()
@@ -189,6 +200,8 @@ type Hijacker interface {
 	//
 	// After a call to Hijack, the original Request.Body must
 	// not be used.
+	// [Min] 取代 http 包对连接的掌控，需要手动处理连接，如关闭，超时等，
+	// [Min] 返回的ReadWriter中可能有未处理的数据
 	Hijack() (net.Conn, *bufio.ReadWriter, error)
 }
 
@@ -197,6 +210,7 @@ type Hijacker interface {
 //
 // This mechanism can be used to cancel long operations on the server
 // if the client has disconnected before the response is ready.
+// [Min] CloseNotifier用于判断连接是否已经失效，如客户在 server 返回前提前关闭了连接
 type CloseNotifier interface {
 	// CloseNotify returns a channel that receives at most a
 	// single value (true) when the client connection has gone
@@ -216,6 +230,8 @@ type CloseNotifier interface {
 	// enabled in browsers and not seen often in the wild. If this
 	// is a problem, use HTTP/2 or only use CloseNotify on methods
 	// such as POST.
+	// [Min] CloseNotify返回一个 channel，如果在 handler 返回之前收到真值，
+	// [Min] 则说明连接已经失效，handler 返回后无法通过此 channel 来确认连接是否失效
 	CloseNotify() <-chan bool
 }
 
@@ -234,6 +250,7 @@ var (
 )
 
 // A conn represents the server side of an HTTP connection.
+// [Min] conn 表示服务器端的 HTTP 连接
 type conn struct {
 	// server is the server on which the connection arrived.
 	// Immutable; never nil.
@@ -246,6 +263,7 @@ type conn struct {
 	// This is never wrapped by other types and is the value given out
 	// to CloseNotifier callers. It is usually of type *net.TCPConn or
 	// *tls.Conn.
+	// [Min] 底层的 net Conn，通常是*net.TCPConn 或 *tls.Conn.
 	rwc net.Conn
 
 	// remoteAddr is rwc.RemoteAddr().String(). It is not populated synchronously
@@ -290,6 +308,7 @@ type conn struct {
 	hijackedv bool
 }
 
+// [Min] 判断 conn 是否 hijacked
 func (c *conn) hijacked() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -297,23 +316,24 @@ func (c *conn) hijacked() bool {
 }
 
 // c.mu must be held.
+// [Min] hijack conn
 func (c *conn) hijackLocked() (rwc net.Conn, buf *bufio.ReadWriter, err error) {
 	if c.hijackedv {
 		return nil, nil, ErrHijacked
 	}
-	c.r.abortPendingRead()
+	c.r.abortPendingRead() // [Min] 舍弃 connReader 中剩余的未读数据
 
 	c.hijackedv = true
 	rwc = c.rwc
-	rwc.SetDeadline(time.Time{})
+	rwc.SetDeadline(time.Time{}) // [Min] 清除原有 deadline
 
-	buf = bufio.NewReadWriter(c.bufr, bufio.NewWriter(rwc))
+	buf = bufio.NewReadWriter(c.bufr, bufio.NewWriter(rwc)) // [Min] 将 buf 中已读的数据返回
 	if c.r.hasByte {
 		if _, err := c.bufr.Peek(c.bufr.Buffered() + 1); err != nil {
 			return nil, nil, fmt.Errorf("unexpected Peek failure reading buffered byte: %v", err)
 		}
 	}
-	c.setState(rwc, StateHijacked)
+	c.setState(rwc, StateHijacked) // [Min] 设置 hijack 状态
 	return
 }
 
@@ -330,6 +350,7 @@ const bufferBeforeChunkingSize = 2048
 // size. It also conditionally adds chunk headers, when in chunking mode.
 //
 // See the comment above (*response).Write for the entire write flow.
+// [Min] 块写数据载体
 type chunkWriter struct {
 	res *response
 
@@ -354,10 +375,13 @@ var (
 	colonSpace = []byte(": ")
 )
 
+// [Min] 将 p 中数据写入cw.res.conn.bufw
 func (cw *chunkWriter) Write(p []byte) (n int, err error) {
+	// [Min] 如果 header 还没写，先写 header
 	if !cw.wroteHeader {
 		cw.writeHeader(p)
 	}
+	// [Min] 如果 request.Method 仅仅是 HEAD，则直接返回
 	if cw.res.req.Method == "HEAD" {
 		// Eat writes.
 		return len(p), nil
@@ -379,6 +403,7 @@ func (cw *chunkWriter) Write(p []byte) (n int, err error) {
 	return
 }
 
+// [Min] 将 bufw 中的数据写入 cw.res.w中
 func (cw *chunkWriter) flush() {
 	if !cw.wroteHeader {
 		cw.writeHeader(nil)
@@ -386,6 +411,7 @@ func (cw *chunkWriter) flush() {
 	cw.res.conn.bufw.Flush()
 }
 
+// [Min] 关闭chunkWriter
 func (cw *chunkWriter) close() {
 	if !cw.wroteHeader {
 		cw.writeHeader(nil)
@@ -479,6 +505,7 @@ const TrailerPrefix = "Trailer:"
 
 // finalTrailers is called after the Handler exits and returns a non-nil
 // value if the Handler set any trailers.
+// [Min] 将"Trailer:foo"以"foo"为 key 添加到最终 header 中，再将 w.tailers 中的 key-value 对加入 header
 func (w *response) finalTrailers() Header {
 	var t Header
 	for k, vv := range w.handlerHeader {
@@ -508,6 +535,7 @@ func (b *atomicBool) setTrue()    { atomic.StoreInt32((*int32)(b), 1) }
 // declareTrailer is called for each Trailer header when the
 // response header is written. It notes that a header will need to be
 // written in the trailers at the end of the response.
+// [Min] 将 k 写入 response 的 tailers 中
 func (w *response) declareTrailer(k string) {
 	k = CanonicalHeaderKey(k)
 	switch k {
@@ -520,6 +548,7 @@ func (w *response) declareTrailer(k string) {
 
 // requestTooLarge is called by maxBytesReader when too much input has
 // been read from the client.
+// [Min] request 超过maxBytesReader的限制
 func (w *response) requestTooLarge() {
 	w.closeAfterReply = true
 	w.requestBodyLimitHit = true
@@ -529,6 +558,7 @@ func (w *response) requestTooLarge() {
 }
 
 // needsSniff reports whether a Content-Type still needs to be sniffed.
+// [Min] 是否需要嗅探
 func (w *response) needsSniff() bool {
 	_, haveType := w.handlerHeader["Content-Type"]
 	return !w.cw.wroteHeader && !haveType && w.written < sniffLen
@@ -540,6 +570,7 @@ type writerOnly struct {
 	io.Writer
 }
 
+// [Min] 判断 src 是否为常规文件
 func srcIsRegularFile(src io.Reader) (isRegular bool, err error) {
 	switch v := src.(type) {
 	case *os.File:
@@ -557,6 +588,7 @@ func srcIsRegularFile(src io.Reader) (isRegular bool, err error) {
 
 // ReadFrom is here to optimize copying from an *os.File regular file
 // to a *net.TCPConn with sendfile.
+// [Min] 将数据从 src 中写入 w
 func (w *response) ReadFrom(src io.Reader) (n int64, err error) {
 	// Our underlying w.conn.rwc is usually a *TCPConn (with its
 	// own ReadFrom method). If not, or if our src isn't a regular
@@ -566,6 +598,8 @@ func (w *response) ReadFrom(src io.Reader) (n int64, err error) {
 	if err != nil {
 		return 0, err
 	}
+	// [Min] 若 rwc 没有实现 io.ReaderFrom或者 src 不是常规文件，
+	// [Min] 则通过 io.CopyBuffer 将数据从 src 中写入 w，并记录在copyBufPool中
 	if !ok || !regFile {
 		bufp := copyBufPool.Get().(*[]byte)
 		defer copyBufPool.Put(bufp)
@@ -607,6 +641,7 @@ func (w *response) ReadFrom(src io.Reader) (n int64, err error) {
 const debugServerConnections = false
 
 // Create new connection from rwc.
+// [Min] server根据底层的 net.Conn 建立 conn
 func (srv *Server) newConn(rwc net.Conn) *conn {
 	c := &conn{
 		server: srv,
@@ -630,7 +665,7 @@ type readResult struct {
 // call blocked in a background goroutine to wait for activity and
 // trigger a CloseNotifier channel.
 type connReader struct {
-	conn *conn
+	conn *conn // [Min] 指向包含该 connReader 的 conn 的指针
 
 	mu      sync.Mutex // guards following
 	hasByte bool
@@ -838,6 +873,7 @@ func putBufioWriter(bw *bufio.Writer) {
 // This can be overridden by setting Server.MaxHeaderBytes.
 const DefaultMaxHeaderBytes = 1 << 20 // 1 MB
 
+// [Min] 该 server 中 http request 的最大 header 长度
 func (srv *Server) maxHeaderBytes() int {
 	if srv.MaxHeaderBytes > 0 {
 		return srv.MaxHeaderBytes
@@ -845,6 +881,7 @@ func (srv *Server) maxHeaderBytes() int {
 	return DefaultMaxHeaderBytes
 }
 
+// [Min] 返回最大 header 长度 + 4k
 func (srv *Server) initialReadLimitSize() int64 {
 	return int64(srv.maxHeaderBytes()) + 4096 // bufio slop
 }
@@ -888,6 +925,7 @@ func (ecr *expectContinueReader) Close() error {
 const TimeFormat = "Mon, 02 Jan 2006 15:04:05 GMT"
 
 // appendTime is a non-allocating version of []byte(t.UTC().Format(TimeFormat))
+// [Min] 在 b 后追加时间，格式为"Mon, 02 Jan 2006 15:04:05 GMT"
 func appendTime(b []byte, t time.Time) []byte {
 	const days = "SunMonTueWedThuFriSat"
 	const months = "JanFebMarAprMayJunJulAugSepOctNovDec"
@@ -922,12 +960,15 @@ func (c *conn) readRequest(ctx context.Context) (w *response, err error) {
 		hdrDeadline      time.Time // or zero if none
 	)
 	t0 := time.Now()
+	// [Min] 计算读取 header 的 deadline
 	if d := c.server.readHeaderTimeout(); d != 0 {
 		hdrDeadline = t0.Add(d)
 	}
+	// [Min] 整个 request 的 deadline
 	if d := c.server.ReadTimeout; d != 0 {
 		wholeReqDeadline = t0.Add(d)
 	}
+	// [Min] 为底层 net.Conn 设置读超时，写超时
 	c.rwc.SetReadDeadline(hdrDeadline)
 	if d := c.server.WriteTimeout; d != 0 {
 		defer func() {
@@ -938,9 +979,10 @@ func (c *conn) readRequest(ctx context.Context) (w *response, err error) {
 	c.r.setReadLimit(c.server.initialReadLimitSize())
 	if c.lastMethod == "POST" {
 		// RFC 2616 section 4.1 tolerance for old buggy clients.
-		peek, _ := c.bufr.Peek(4) // ReadRequest will get err below
-		c.bufr.Discard(numLeadingCRorLF(peek))
+		peek, _ := c.bufr.Peek(4)              // ReadRequest will get err below
+		c.bufr.Discard(numLeadingCRorLF(peek)) // [Min] 跳过 bufr 中前4位中，以连续的\r,\n开头的部分
 	}
+	// [Min] 从 c.bufr 中读取 request，返回 Request
 	req, err := readRequest(c.bufr, keepHostHeader)
 	if err != nil {
 		if c.r.hitReadLimit() {
@@ -949,24 +991,31 @@ func (c *conn) readRequest(ctx context.Context) (w *response, err error) {
 		return nil, err
 	}
 
+	// [Min] 检查 request 是否支持
 	if !http1ServerSupportsRequest(req) {
 		return nil, badRequestError("unsupported protocol version")
 	}
 
+	// [Min] 根据 request 的 Method 重置 c.lastMethod，并设读取长度不受限
 	c.lastMethod = req.Method
 	c.r.setInfiniteReadLimit()
 
 	hosts, haveHost := req.Header["Host"]
+	// [Min] request 是否为 http2的升级
 	isH2Upgrade := req.isH2Upgrade()
+	// [Min] 如果http版本号至少为1.1，且不是 http2升级，且不是 CONNECT，且 header 中不含 Host 信息，报错
 	if req.ProtoAtLeast(1, 1) && (!haveHost || len(hosts) == 0) && !isH2Upgrade && req.Method != "CONNECT" {
 		return nil, badRequestError("missing required Host header")
 	}
+	// [Min] Host header太多，报错
 	if len(hosts) > 1 {
 		return nil, badRequestError("too many Host headers")
 	}
+	// [Min] Host 信息无效，报错
 	if len(hosts) == 1 && !httplex.ValidHostHeader(hosts[0]) {
 		return nil, badRequestError("malformed Host header")
 	}
+	// [Min] 检查 header 中的每一项是否合规
 	for k, vv := range req.Header {
 		if !httplex.ValidHeaderFieldName(k) {
 			return nil, badRequestError("invalid header name")
@@ -977,9 +1026,10 @@ func (c *conn) readRequest(ctx context.Context) (w *response, err error) {
 			}
 		}
 	}
+	// [Min] 从 header 中删除 Host
 	delete(req.Header, "Host")
 
-	ctx, cancelCtx := context.WithCancel(ctx)
+	ctx, cancelCtx := context.WithCancel(ctx) // [Min] 获取 cancelCtx
 	req.ctx = ctx
 	req.RemoteAddr = c.remoteAddr
 	req.TLS = c.tlsState
@@ -1017,6 +1067,7 @@ func (c *conn) readRequest(ctx context.Context) (w *response, err error) {
 
 // http1ServerSupportsRequest reports whether Go's HTTP/1.x server
 // supports the given request.
+// [Min] 检查  server 是否支持request
 func http1ServerSupportsRequest(req *Request) bool {
 	if req.ProtoMajor == 1 {
 		return true
@@ -1032,6 +1083,7 @@ func http1ServerSupportsRequest(req *Request) bool {
 	return false
 }
 
+// [Min] 获取 Header
 func (w *response) Header() Header {
 	if w.cw.header == nil && w.wroteHeader && !w.cw.wroteHeader {
 		// Accessing the header between logically writing it
@@ -1054,6 +1106,7 @@ func (w *response) Header() Header {
 // well read them)
 const maxPostHandlerReadBytes = 256 << 10
 
+// [Min] 检查header code
 func checkWriteHeaderCode(code int) {
 	// Issue 22880: require valid WriteHeader status codes.
 	// For now we only enforce that it's three digits.
@@ -1071,6 +1124,7 @@ func checkWriteHeaderCode(code int) {
 	}
 }
 
+// [Min] 向 header 写入 code 和 content-length
 func (w *response) WriteHeader(code int) {
 	if w.conn.hijacked() {
 		w.conn.server.logf("http: response.WriteHeader on hijacked connection")
@@ -1127,6 +1181,7 @@ var (
 // This method has a value receiver, despite the somewhat large size
 // of h, because it prevents an allocation. The escape analysis isn't
 // smart enough to realize this function doesn't mutate h.
+// [Min] 将 h 中的数据写入 w
 func (h extraHeader) Write(w *bufio.Writer) {
 	if h.date != nil {
 		w.Write(headerDate)
@@ -1156,7 +1211,9 @@ func (h extraHeader) Write(w *bufio.Writer) {
 // set explicitly. It's also used to set the Content-Length, if the
 // total body size was small and the handler has already finished
 // running.
+// [Min] 根据 p 确定 header 并写入cw.res.conn.bufw
 func (cw *chunkWriter) writeHeader(p []byte) {
+	// [Min] 若已写，则直接返回
 	if cw.wroteHeader {
 		return
 	}
@@ -1171,11 +1228,15 @@ func (cw *chunkWriter) writeHeader(p []byte) {
 	// don't own it, the exclude map is created lazily for
 	// WriteSubset to remove headers. The setHeader struct holds
 	// headers we need to add.
+	// [Min] header 优先使用 cw 中的 header，若不存在，则取 cw.res.handlerHeader
 	header := cw.header
 	owned := header != nil
 	if !owned {
 		header = w.handlerHeader
 	}
+	// [Min] 一个需要排除掉的 header 的 map，并定义一个 delHeader 函数按key删除 header
+	// [Min] 若 cw.header 有数据，则直接在 cw.header中尝试删除 key，
+	// [Min] 若 cw.header 为 nil，则将需要删除的 header 的 key 记录在上述定义的排除 map 中
 	var excludeHeader map[string]bool
 	delHeader := func(key string) {
 		if owned {
@@ -1193,6 +1254,7 @@ func (cw *chunkWriter) writeHeader(p []byte) {
 	var setHeader extraHeader
 
 	// Don't write out the fake "Trailer:foo" keys. See TrailerPrefix.
+	// [Min] 处理key类似于"Trailer:foo"的 header，将它们写入排除 map 中
 	trailers := false
 	for k := range cw.header {
 		if strings.HasPrefix(k, TrailerPrefix) {
@@ -1203,6 +1265,7 @@ func (cw *chunkWriter) writeHeader(p []byte) {
 			trailers = true
 		}
 	}
+	// [Min] 将真正的以"Trailer"为 key 的 header 中的每一个字符串的每一个由','分隔的字符串，根据cw.res.declareTrailer写入 cw.res.tailers
 	for _, v := range cw.header["Trailer"] {
 		trailers = true
 		foreachHeaderElement(v, cw.res.declareTrailer)
@@ -1415,6 +1478,7 @@ func (cw *chunkWriter) writeHeader(p []byte) {
 
 // foreachHeaderElement splits v according to the "#rule" construction
 // in RFC 2616 section 2.1 and calls fn for each non-empty element.
+// [Min] 对 v 中的每一个由','分隔的部分作用 fn
 func foreachHeaderElement(v string, fn func(string)) {
 	v = textproto.TrimString(v)
 	if v == "" {
@@ -1435,6 +1499,7 @@ func foreachHeaderElement(v string, fn func(string)) {
 // to bw. is11 is whether the HTTP request is HTTP/1.1. false means HTTP/1.0.
 // code is the response status code.
 // scratch is an optional scratch buffer. If it has at least capacity 3, it's used.
+// [Min] 写入 statusline
 func writeStatusLine(bw *bufio.Writer, is11 bool, code int, scratch []byte) {
 	if is11 {
 		bw.WriteString("HTTP/1.1 ")
@@ -1454,6 +1519,7 @@ func writeStatusLine(bw *bufio.Writer, is11 bool, code int, scratch []byte) {
 
 // bodyAllowed reports whether a Write is allowed for this response type.
 // It's illegal to call this before the header has been flushed.
+// [Min] 根据状态判断 body 对该 response是否允许，100-199，204，304不允许有 body
 func (w *response) bodyAllowed() bool {
 	if !w.wroteHeader {
 		panic("")
@@ -1495,15 +1561,18 @@ func (w *response) bodyAllowed() bool {
 // threshold and nothing is in (2).  The answer might be mostly making
 // bufferBeforeChunkingSize smaller and having bufio's fast-paths deal
 // with this instead.
+// [Min] 以[]byte形式将数据写入 w.w
 func (w *response) Write(data []byte) (n int, err error) {
 	return w.write(len(data), data, "")
 }
 
+// [Min] 以string形式将数据写入 w.w
 func (w *response) WriteString(data string) (n int, err error) {
 	return w.write(len(data), nil, data)
 }
 
 // either dataB or dataS is non-zero.
+// [Min] 将数据优先以[]byte 的形式写入 w.w，若 dataB为空，则以字符串的形式写入
 func (w *response) write(lenData int, dataB []byte, dataS string) (n int, err error) {
 	if w.conn.hijacked() {
 		if lenData > 0 {
@@ -1532,6 +1601,7 @@ func (w *response) write(lenData int, dataB []byte, dataS string) (n int, err er
 	}
 }
 
+// [Min] 完成 request
 func (w *response) finishRequest() {
 	w.handlerDone.setTrue()
 
@@ -1557,6 +1627,7 @@ func (w *response) finishRequest() {
 
 // shouldReuseConnection reports whether the underlying TCP connection can be reused.
 // It must only be called after the handler is done executing.
+// [Min] 连接是否可再用
 func (w *response) shouldReuseConnection() bool {
 	if w.closeAfterReply {
 		// The request or something set while executing the
@@ -1664,13 +1735,13 @@ func (c *conn) setState(nc net.Conn, state ConnState) {
 	srv := c.server
 	switch state {
 	case StateNew:
-		srv.trackConn(c, true)
+		srv.trackConn(c, true) // [Min] 添加 conn 到活动的 conn map 中
 	case StateHijacked, StateClosed:
-		srv.trackConn(c, false)
+		srv.trackConn(c, false) // [Min] 将 conn 从活动的 conn map 中删除
 	}
-	c.curState.Store(connStateInterface[state])
+	c.curState.Store(connStateInterface[state]) // [Min] 设置当前状态
 	if hook := srv.ConnState; hook != nil {
-		hook(nc, state)
+		hook(nc, state) // [Min] 对新状态的附加处理
 	}
 }
 
@@ -1702,6 +1773,7 @@ var ErrAbortHandler = errors.New("net/http: abort Handler")
 // encountered during reading a request off the network when the
 // client has gone away or had its read fail somehow. This is used to
 // determine which logs are interesting enough to log about.
+// [Min] 是否为普通的网络读取错误，EOF,timeout,read error
 func isCommonNetReadError(err error) bool {
 	if err == io.EOF {
 		return true
@@ -1717,7 +1789,9 @@ func isCommonNetReadError(err error) bool {
 
 // Serve a new connection.
 func (c *conn) serve(ctx context.Context) {
+	// [Min] 将底层 net.Conn 的 remoteaddr 赋给 c.remoteAddr
 	c.remoteAddr = c.rwc.RemoteAddr().String()
+	// [Min] 将底层 net.Conn 的 localaddr 写入 context 中
 	ctx = context.WithValue(ctx, LocalAddrContextKey, c.rwc.LocalAddr())
 	defer func() {
 		if err := recover(); err != nil && err != ErrAbortHandler {
@@ -1760,10 +1834,12 @@ func (c *conn) serve(ctx context.Context) {
 	c.cancelCtx = cancelCtx
 	defer cancelCtx()
 
+	// [Min] 初始化 c.r,c.bufr,c.bufw
 	c.r = &connReader{conn: c}
 	c.bufr = newBufioReader(c.r)
 	c.bufw = newBufioWriterSize(checkConnErrorWriter{c}, 4<<10)
 
+	// [Min] 循环处理 request
 	for {
 		w, err := c.readRequest(ctx)
 		if c.r.remain != c.server.initialReadLimitSize() {
@@ -1827,6 +1903,7 @@ func (c *conn) serve(ctx context.Context) {
 		// in parallel even if their responses need to be serialized.
 		// But we're not going to implement HTTP pipelining because it
 		// was never deployed in the wild and the answer is HTTP/2.
+		// [Min] 调用 ServeHTTP 处理 request
 		serverHandler{c.server}.ServeHTTP(w, w.req)
 		w.cancelCtx()
 		if c.hijacked() {
@@ -1940,6 +2017,8 @@ func requestBodyRemains(rc io.ReadCloser) bool {
 // ordinary functions as HTTP handlers. If f is a function
 // with the appropriate signature, HandlerFunc(f) is a
 // Handler that calls f.
+// [Min] HandlerFunc 实现了 Handler 接口，可以方便地将函数用作 handler
+// [Min] 如果 f 是一个func(ResponseWriter, *Request)，那么 HandlerFunc(f)就是调用 f 的 handler
 type HandlerFunc func(ResponseWriter, *Request)
 
 // ServeHTTP calls f(w, r).
@@ -1961,10 +2040,12 @@ func Error(w ResponseWriter, error string, code int) {
 }
 
 // NotFound replies to the request with an HTTP 404 not found error.
+// [Min] NotFound HandlerFunc
 func NotFound(w ResponseWriter, r *Request) { Error(w, "404 page not found", StatusNotFound) }
 
 // NotFoundHandler returns a simple request handler
 // that replies to each request with a ``404 page not found'' reply.
+// [Min] NotFound handler
 func NotFoundHandler() Handler { return HandlerFunc(NotFound) }
 
 // StripPrefix returns a handler that serves HTTP requests
@@ -1972,6 +2053,9 @@ func NotFoundHandler() Handler { return HandlerFunc(NotFound) }
 // and invoking the handler h. StripPrefix handles a
 // request for a path that doesn't begin with prefix by
 // replying with an HTTP 404 not found error.
+// [Min] 返回一个需要匹配 request URL.Path 前缀的 handler，
+// [Min] 如果匹配了，则将 path 替换为不含前缀的部分，
+// [Min] 如果不匹配，则返回 notfound
 func StripPrefix(prefix string, h Handler) Handler {
 	if prefix == "" {
 		return h
@@ -1995,6 +2079,7 @@ func StripPrefix(prefix string, h Handler) Handler {
 //
 // The provided code should be in the 3xx range and is usually
 // StatusMovedPermanently, StatusFound or StatusSeeOther.
+// [Min] 重定向
 func Redirect(w ResponseWriter, r *Request, url string, code int) {
 	// parseURL is just url.Parse (url is shadowed for godoc).
 	if u, err := parseURL(url); err == nil {
@@ -2071,11 +2156,13 @@ var htmlReplacer = strings.NewReplacer(
 	"'", "&#39;",
 )
 
+// [Min] 转义 html 字符 &,<,>,",'
 func htmlEscape(s string) string {
 	return htmlReplacer.Replace(s)
 }
 
 // Redirect to a fixed URL
+// [Min] 重定向的 Handler
 type redirectHandler struct {
 	url  string
 	code int
@@ -2091,6 +2178,7 @@ func (rh *redirectHandler) ServeHTTP(w ResponseWriter, r *Request) {
 //
 // The provided code should be in the 3xx range and is usually
 // StatusMovedPermanently, StatusFound or StatusSeeOther.
+// [Min] 封装重定向 handler
 func RedirectHandler(url string, code int) Handler {
 	return &redirectHandler{url, code}
 }
@@ -2130,10 +2218,18 @@ func RedirectHandler(url string, code int) Handler {
 // ServeMux also takes care of sanitizing the URL request path,
 // redirecting any request containing . or .. elements or repeated slashes
 // to an equivalent, cleaner URL.
+/* [Min]
+ServerMux 是一个多路选择器，它会最大程度地匹配 request 的 URL 和注册的handler 对应的pattern
+pattern指明了以根开始的路径，匹配 url 和 pattern 的时候，长 pattern 优先
+以'/'结尾的 pattern 可以匹配'/'前对应的路径的子目录，'/'可以匹配任意没有被其他注册pattern匹配的路径
+如果注册了以'/'结尾的 pattern，但 url 中不以'/'结尾，则 server 会重定向到该pattern 对应的路径，除非不含'/'的路径也注册了 pattern
+pattern注册可以选择带host，由 hosts 这个 bool 变量指明是否带 host
+ServerMux 也可以处理带'.','..'的相对地址的 request
+*/
 type ServeMux struct {
 	mu    sync.RWMutex
-	m     map[string]muxEntry
-	hosts bool // whether any patterns contain hostnames
+	m     map[string]muxEntry // [Min] map的 key 就是 pattern
+	hosts bool                // whether any patterns contain hostnames
 }
 
 type muxEntry struct {
@@ -2150,29 +2246,37 @@ var DefaultServeMux = &defaultServeMux
 var defaultServeMux ServeMux
 
 // Does path match pattern?
+// [Min] 路径是否和 pattern 匹配
 func pathMatch(pattern, path string) bool {
 	if len(pattern) == 0 {
 		// should not happen
 		return false
 	}
 	n := len(pattern)
+	// [Min] 如果是以'/'结尾的 pattern，则路径需要和 pattern 完全相同
 	if pattern[n-1] != '/' {
 		return pattern == path
 	}
+	// [Min] path 长度要大于等于 pattern 长度，且 path 以 pattern 为前缀
 	return len(path) >= n && path[0:n] == pattern
 }
 
 // Return the canonical path for p, eliminating . and .. elements.
+// [Min] 标准化 path
 func cleanPath(p string) string {
+	// [Min] 若 path 为空，则返回根路径'/'
 	if p == "" {
 		return "/"
 	}
+	// [Min] 若 path 不以根目录开头，则添加根目录'/'
 	if p[0] != '/' {
 		p = "/" + p
 	}
+	// [Min] 调用 path.Clean 格式化路径
 	np := path.Clean(p)
 	// path.Clean removes trailing slash except for root;
 	// put the trailing slash back if necessary.
+	// [Min] 因为 path.Clean 会清除非 root 路径的最后一个'/'，所有如果原路径以'/'结尾，需要重新添上
 	if p[len(p)-1] == '/' && np != "/" {
 		np += "/"
 	}
@@ -2180,6 +2284,7 @@ func cleanPath(p string) string {
 }
 
 // stripHostPort returns h without any trailing ":<port>".
+// [Min] 去除 port 部分，返回 host
 func stripHostPort(h string) string {
 	// If no port on host, return unchanged
 	if strings.IndexByte(h, ':') == -1 {
@@ -2194,19 +2299,23 @@ func stripHostPort(h string) string {
 
 // Find a handler on a handler map given a path string.
 // Most-specific (longest) pattern wins.
+// [Min] 由给定的 path  在 mux 中找到匹配的 handler
 func (mux *ServeMux) match(path string) (h Handler, pattern string) {
 	// Check for exact match first.
+	// [Min] 首先查看是否有完全匹配的路径和 pattern，有就直接返回
 	v, ok := mux.m[path]
 	if ok {
 		return v.h, v.pattern
 	}
 
 	// Check for longest valid match.
+	// [Min] 接下来查找最长匹配
 	var n = 0
 	for k, v := range mux.m {
 		if !pathMatch(k, path) {
 			continue
 		}
+		// [Min] 将长度更长的匹配的 pattern 覆盖原来的较短的匹配的 pattern
 		if h == nil || len(k) > n {
 			n = len(k)
 			h = v.h
@@ -2220,6 +2329,7 @@ func (mux *ServeMux) match(path string) (h Handler, pattern string) {
 // This occurs when a handler for path + "/" was already registered, but
 // not for path itself. If the path needs appending to, it creates a new
 // URL, setting the path to u.Path + "/" and returning true to indicate so.
+// [Min] 当存在 path + "/"的 pattern，但不存在 path 的 pattern，且路径却仅仅是 path 的时候，返回 path + "/"的 url
 func (mux *ServeMux) redirectToPathSlash(path string, u *url.URL) (*url.URL, bool) {
 	if !mux.shouldRedirect(path) {
 		return u, false
@@ -2232,6 +2342,7 @@ func (mux *ServeMux) redirectToPathSlash(path string, u *url.URL) (*url.URL, boo
 // shouldRedirect reports whether the given path should be redirected to
 // path+"/". This should happen if a handler is registered for path+"/" but
 // not path -- see comments at ServeMux.
+// [Min] path + '/' 为 pattern，但 path 不为 pattern,且 path 不以'/'结尾时，需要重定向
 func (mux *ServeMux) shouldRedirect(path string) bool {
 	if _, exist := mux.m[path]; exist {
 		return false
@@ -2256,6 +2367,7 @@ func (mux *ServeMux) shouldRedirect(path string) bool {
 //
 // If there is no registered handler that applies to the request,
 // Handler returns a ``page not found'' handler and an empty pattern.
+// [Min] 返回 mux 中 对应于 request 的 handler，即 request 的 path 要与 mux 的 pattern 匹配
 func (mux *ServeMux) Handler(r *Request) (h Handler, pattern string) {
 
 	// CONNECT requests are not canonicalized.
@@ -2272,6 +2384,7 @@ func (mux *ServeMux) Handler(r *Request) (h Handler, pattern string) {
 
 	// All other requests have any port stripped and path cleaned
 	// before passing to mux.handler.
+	// [Min] 除了 CONNECT 的request，都有先清洗 host 和 path
 	host := stripHostPort(r.Host)
 	path := cleanPath(r.URL.Path)
 
@@ -2281,6 +2394,7 @@ func (mux *ServeMux) Handler(r *Request) (h Handler, pattern string) {
 		return RedirectHandler(u.String(), StatusMovedPermanently), u.Path
 	}
 
+	// [Min] 如果 path 和原 path 不同，则重定向到现有的 path
 	if path != r.URL.Path {
 		_, pattern = mux.handler(host, path)
 		url := *r.URL
@@ -2293,11 +2407,13 @@ func (mux *ServeMux) Handler(r *Request) (h Handler, pattern string) {
 
 // handler is the main implementation of Handler.
 // The path is known to be in canonical form, except for CONNECT methods.
+// [Min] 根据 host和 path，返回mux 中匹配的 handler 和 pattern
 func (mux *ServeMux) handler(host, path string) (h Handler, pattern string) {
 	mux.mu.RLock()
 	defer mux.mu.RUnlock()
 
 	// Host-specific pattern takes precedence over generic ones
+	// [Min] 如果 pattern 带 host，优先匹配带 host 的 path和 pattern，如果没有匹配成功，则再尝试匹配不带 host 的 path
 	if mux.hosts {
 		h, pattern = mux.match(host + path)
 	}
@@ -2312,6 +2428,7 @@ func (mux *ServeMux) handler(host, path string) (h Handler, pattern string) {
 
 // ServeHTTP dispatches the request to the handler whose
 // pattern most closely matches the request URL.
+// [Min] mux 实现了 Handler 接口，根据 request 找到对应的 handler 然后再根据该 handler对 request 进行处理
 func (mux *ServeMux) ServeHTTP(w ResponseWriter, r *Request) {
 	if r.RequestURI == "*" {
 		if r.ProtoAtLeast(1, 1) {
@@ -2326,6 +2443,7 @@ func (mux *ServeMux) ServeHTTP(w ResponseWriter, r *Request) {
 
 // Handle registers the handler for the given pattern.
 // If a handler already exists for pattern, Handle panics.
+// [Min] 在 mux 中注册 pattern handler
 func (mux *ServeMux) Handle(pattern string, handler Handler) {
 	mux.mu.Lock()
 	defer mux.mu.Unlock()
@@ -2345,12 +2463,14 @@ func (mux *ServeMux) Handle(pattern string, handler Handler) {
 	}
 	mux.m[pattern] = muxEntry{h: handler, pattern: pattern}
 
+	// [Min] 如果注册的 pattern 不以'/'开头，则标记 hosts 为真
 	if pattern[0] != '/' {
 		mux.hosts = true
 	}
 }
 
 // HandleFunc registers the handler function for the given pattern.
+// [Min]  以 HandlerFunc 的形式在 mux 中注册 pattern handler
 func (mux *ServeMux) HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {
 	mux.Handle(pattern, HandlerFunc(handler))
 }
@@ -2358,11 +2478,13 @@ func (mux *ServeMux) HandleFunc(pattern string, handler func(ResponseWriter, *Re
 // Handle registers the handler for the given pattern
 // in the DefaultServeMux.
 // The documentation for ServeMux explains how patterns are matched.
+// [Min] 在默认的 mux 中注册 patten，handler
 func Handle(pattern string, handler Handler) { DefaultServeMux.Handle(pattern, handler) }
 
 // HandleFunc registers the handler function for the given pattern
 // in the DefaultServeMux.
 // The documentation for ServeMux explains how patterns are matched.
+// [Min] 以 HandlerFunc 的形式在默认的 mux 中注册 pattern,handler
 func HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {
 	DefaultServeMux.HandleFunc(pattern, handler)
 }
@@ -2371,6 +2493,7 @@ func HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {
 // creating a new service goroutine for each. The service goroutines
 // read requests and then call handler to reply to them.
 // Handler is typically nil, in which case the DefaultServeMux is used.
+// [Min] 启动服务，如果使用DefaultServeMux，handler 一般就是 nil，如果使用自定义 mux，则 handler 就是 mux
 func Serve(l net.Listener, handler Handler) error {
 	srv := &Server{Handler: handler}
 	return srv.Serve(l)
@@ -2386,6 +2509,7 @@ func Serve(l net.Listener, handler Handler) error {
 // for the server must be provided. If the certificate is signed by a
 // certificate authority, the certFile should be the concatenation
 // of the server's certificate, any intermediates, and the CA's certificate.
+// [Min] 同 Serve
 func ServeTLS(l net.Listener, handler Handler, certFile, keyFile string) error {
 	srv := &Server{Handler: handler}
 	return srv.ServeTLS(l, certFile, keyFile)
@@ -2393,8 +2517,11 @@ func ServeTLS(l net.Listener, handler Handler, certFile, keyFile string) error {
 
 // A Server defines parameters for running an HTTP server.
 // The zero value for Server is a valid configuration.
+// [Min] Server 定义了运行一个 http server 需要的参数，零值也是有效的配置
 type Server struct {
-	Addr    string  // TCP address to listen on, ":http" if empty
+	// [Min] 监听的TCP address
+	Addr string // TCP address to listen on, ":http" if empty
+	// [Min] Handler，一般为 mux
 	Handler Handler // handler to invoke, http.DefaultServeMux if nil
 
 	// TLSConfig optionally provides a TLS configuration for use
@@ -2431,6 +2558,7 @@ type Server struct {
 	// next request when keep-alives are enabled. If IdleTimeout
 	// is zero, the value of ReadTimeout is used. If both are
 	// zero, ReadHeaderTimeout is used.
+	// [Min] 闲置超时
 	IdleTimeout time.Duration
 
 	// MaxHeaderBytes controls the maximum number of bytes the
@@ -2454,6 +2582,7 @@ type Server struct {
 	// ConnState specifies an optional callback function that is
 	// called when a client connection changes state. See the
 	// ConnState type and associated constants for details.
+	// [Min] client connection 修改 state 的回调函数
 	ConnState func(net.Conn, ConnState)
 
 	// ErrorLog specifies an optional logger for errors accepting
@@ -2474,12 +2603,14 @@ type Server struct {
 	onShutdown []func()
 }
 
+// [Min] 获得 doneChan
 func (s *Server) getDoneChan() <-chan struct{} {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.getDoneChanLocked()
 }
 
+// [Min]  在server锁住的情况下返回 doneChan
 func (s *Server) getDoneChanLocked() chan struct{} {
 	if s.doneChan == nil {
 		s.doneChan = make(chan struct{})
@@ -2487,6 +2618,7 @@ func (s *Server) getDoneChanLocked() chan struct{} {
 	return s.doneChan
 }
 
+// [Min]  在 server 锁住的情况下关闭 doneChan
 func (s *Server) closeDoneChanLocked() {
 	ch := s.getDoneChanLocked()
 	select {
@@ -2508,11 +2640,13 @@ func (s *Server) closeDoneChanLocked() {
 //
 // Close returns any error returned from closing the Server's
 // underlying Listener(s).
+// [Min] 关闭所有 listerners 和 connections
 func (srv *Server) Close() error {
 	srv.mu.Lock()
 	defer srv.mu.Unlock()
 	srv.closeDoneChanLocked()
 	err := srv.closeListenersLocked()
+	// [Min] 关闭所有活动的 connection，并从 server 中删除
 	for c := range srv.activeConn {
 		c.rwc.Close()
 		delete(srv.activeConn, c)
@@ -2527,6 +2661,7 @@ func (srv *Server) Close() error {
 // but which also doesn't have a high runtime cost (and doesn't
 // involve any contentious mutexes), but that is left as an
 // exercise for the reader.
+// [Min] 尝试关闭所有连接的间隔，有可能一次关闭的时候有连接在用，就需要后续继续尝试关闭
 var shutdownPollInterval = 500 * time.Millisecond
 
 // Shutdown gracefully shuts down the server without interrupting any
@@ -2546,7 +2681,9 @@ var shutdownPollInterval = 500 * time.Millisecond
 // separately notify such long-lived connections of shutdown and wait
 // for them to close, if desired. See RegisterOnShutdown for a way to
 // register shutdown notification functions.
+// [Min] 关闭 server 而不影响正在处理的连接
 func (srv *Server) Shutdown(ctx context.Context) error {
+	// [Min] 设置 Server 正在关闭的状态
 	atomic.AddInt32(&srv.inShutdown, 1)
 	defer atomic.AddInt32(&srv.inShutdown, -1)
 
@@ -2561,6 +2698,7 @@ func (srv *Server) Shutdown(ctx context.Context) error {
 	ticker := time.NewTicker(shutdownPollInterval)
 	defer ticker.Stop()
 	for {
+		// [Min] 关闭连接，直至所有连接都已关闭
 		if srv.closeIdleConns() {
 			return lnerr
 		}
@@ -2577,6 +2715,7 @@ func (srv *Server) Shutdown(ctx context.Context) error {
 // undergone NPN/ALPN protocol upgrade or that have been hijacked.
 // This function should start protocol-specific graceful shutdown,
 // but should not wait for shutdown to complete.
+// [Min] 注册在执行 Shutdown 的时候需要执行的函数
 func (srv *Server) RegisterOnShutdown(f func()) {
 	srv.mu.Lock()
 	srv.onShutdown = append(srv.onShutdown, f)
@@ -2585,6 +2724,7 @@ func (srv *Server) RegisterOnShutdown(f func()) {
 
 // closeIdleConns closes all idle connections and reports whether the
 // server is quiescent.
+// [Min] 尝试关闭所有连接，只要有一个没关闭，就返回 false
 func (s *Server) closeIdleConns() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2601,6 +2741,7 @@ func (s *Server) closeIdleConns() bool {
 	return quiescent
 }
 
+// [Min] 在 server 锁住的情况下关闭 listeners 并从 server 中删除
 func (s *Server) closeListenersLocked() error {
 	var err error
 	for ln := range s.listeners {
@@ -2666,12 +2807,14 @@ func (c ConnState) String() string {
 
 // serverHandler delegates to either the server's Handler or
 // DefaultServeMux and also handles "OPTIONS *" requests.
+// [Min] 封装 Server 成为一个 Handler，在 conn.serve()中调用
 type serverHandler struct {
 	srv *Server
 }
 
 func (sh serverHandler) ServeHTTP(rw ResponseWriter, req *Request) {
 	handler := sh.srv.Handler
+	// [Min] 如果 server 的 Handler 为 nil，使用默认的 mux 作为 handler
 	if handler == nil {
 		handler = DefaultServeMux
 	}
@@ -2686,6 +2829,7 @@ func (sh serverHandler) ServeHTTP(rw ResponseWriter, req *Request) {
 // Accepted connections are configured to enable TCP keep-alives.
 // If srv.Addr is blank, ":http" is used.
 // ListenAndServe always returns a non-nil error.
+// [Min] 启动服务器
 func (srv *Server) ListenAndServe() error {
 	addr := srv.Addr
 	if addr == "" {
@@ -2755,6 +2899,8 @@ func (srv *Server) Serve(l net.Listener) error {
 	ctx := context.WithValue(baseCtx, ServerContextKey, srv)
 	for {
 		rw, e := l.Accept()
+		// [Min] 获得连接，若有错，先检查是否是因为 server 关闭了
+		// [Min] 如果是临时的错误，延迟一定时间后再次尝试，直至延迟到达最大值1s，返回报错
 		if e != nil {
 			select {
 			case <-srv.getDoneChan():
@@ -2777,9 +2923,9 @@ func (srv *Server) Serve(l net.Listener) error {
 			return e
 		}
 		tempDelay = 0
-		c := srv.newConn(rw)
+		c := srv.newConn(rw)        // [Min] 构建 conn
 		c.setState(c.rwc, StateNew) // before Serve can return
-		go c.serve(ctx)
+		go c.serve(ctx)             // [Min] 启动 goroutine 调用 conn.serve()对 request 进行处理
 	}
 }
 
@@ -2800,6 +2946,7 @@ func (srv *Server) Serve(l net.Listener) error {
 //
 // ServeTLS always returns a non-nil error. After Shutdown or Close, the
 // returned error is ErrServerClosed.
+// [Min] 和 Server.ServeTLS类似
 func (srv *Server) ServeTLS(l net.Listener, certFile, keyFile string) error {
 	// Setup HTTP/2 before srv.Serve, to initialize srv.TLSConfig
 	// before we clone it and create the TLS Listener.
@@ -2826,6 +2973,7 @@ func (srv *Server) ServeTLS(l net.Listener, certFile, keyFile string) error {
 	return srv.Serve(tlsListener)
 }
 
+// [Min] 跟踪 listener，记录/删除
 func (s *Server) trackListener(ln net.Listener, add bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2844,6 +2992,7 @@ func (s *Server) trackListener(ln net.Listener, add bool) {
 	}
 }
 
+// [Min] 根据 add 标志，在活动的连接 map 中将 conn 记录或删除
 func (s *Server) trackConn(c *conn, add bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2857,6 +3006,7 @@ func (s *Server) trackConn(c *conn, add bool) {
 	}
 }
 
+// [Min] 返回闲置超时时间，若设置了IdleTimeout，直接返回IdleTimeout，否则返回ReadTimeout
 func (s *Server) idleTimeout() time.Duration {
 	if s.IdleTimeout != 0 {
 		return s.IdleTimeout
@@ -2864,6 +3014,7 @@ func (s *Server) idleTimeout() time.Duration {
 	return s.ReadTimeout
 }
 
+// [Min] 返回 server 的 ReadHeaderTimeout 时间，如果为0，返回ReadTimeout
 func (s *Server) readHeaderTimeout() time.Duration {
 	if s.ReadHeaderTimeout != 0 {
 		return s.ReadHeaderTimeout
@@ -2871,10 +3022,12 @@ func (s *Server) readHeaderTimeout() time.Duration {
 	return s.ReadTimeout
 }
 
+// [Min] Server 是否为 keepalive
 func (s *Server) doKeepAlives() bool {
 	return atomic.LoadInt32(&s.disableKeepAlives) == 0 && !s.shuttingDown()
 }
 
+// [Min] Server 是否正在关闭
 func (s *Server) shuttingDown() bool {
 	return atomic.LoadInt32(&s.inShutdown) != 0
 }
@@ -2883,6 +3036,7 @@ func (s *Server) shuttingDown() bool {
 // By default, keep-alives are always enabled. Only very
 // resource-constrained environments or servers in the process of
 // shutting down should disable them.
+// [Min] 设置 Server keepalive 属性，默认为 true
 func (srv *Server) SetKeepAlivesEnabled(v bool) {
 	if v {
 		atomic.StoreInt32(&srv.disableKeepAlives, 0)
@@ -2951,6 +3105,7 @@ func logf(r *Request, format string, args ...interface{}) {
 //	}
 //
 // ListenAndServe always returns a non-nil error.
+// [Min] 启动服务
 func ListenAndServe(addr string, handler Handler) error {
 	server := &Server{Addr: addr, Handler: handler}
 	return server.ListenAndServe()
@@ -2984,6 +3139,7 @@ func ListenAndServe(addr string, handler Handler) error {
 // One can use generate_cert.go in crypto/tls to generate cert.pem and key.pem.
 //
 // ListenAndServeTLS always returns a non-nil error.
+// [Min] 类似于ListenAndServe
 func ListenAndServeTLS(addr, certFile, keyFile string, handler Handler) error {
 	server := &Server{Addr: addr, Handler: handler}
 	return server.ListenAndServeTLS(certFile, keyFile)
@@ -3074,6 +3230,7 @@ func (srv *Server) onceSetNextProtoDefaults() {
 //
 // TimeoutHandler buffers all Handler writes to memory and does not
 // support the Hijacker or Flusher interfaces.
+// [Min] 返回一个在指定时间范围内执行的 handler，超时返回503 + msg
 func TimeoutHandler(h Handler, dt time.Duration, msg string) Handler {
 	return &timeoutHandler{
 		handler: h,
@@ -3127,7 +3284,7 @@ func (h *timeoutHandler) ServeHTTP(w ResponseWriter, r *Request) {
 		close(done)
 	}()
 	select {
-	case p := <-panicChan:
+	case p := <-panicChan: // [Min] ServeHTTP 在另一个 goroutine 中 panic并恢复了，则 panic
 		panic(p)
 	case <-done:
 		tw.mu.Lock()
@@ -3305,6 +3462,7 @@ func (w checkConnErrorWriter) Write(p []byte) (n int, err error) {
 	return
 }
 
+// [Min] 返回 v 开头部分连续的'\r','\n'的个数
 func numLeadingCRorLF(v []byte) (n int) {
 	for _, b := range v {
 		if b == '\r' || b == '\n' {
@@ -3317,6 +3475,7 @@ func numLeadingCRorLF(v []byte) (n int) {
 
 }
 
+// [Min] 字符串切片 ss 是否包含字符串 s
 func strSliceContains(ss []string, s string) bool {
 	for _, v := range ss {
 		if v == s {
