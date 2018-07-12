@@ -72,6 +72,7 @@ type Dialer struct {
 	Cancel <-chan struct{}
 }
 
+// [Min] 返回两个时间中较早的那一个，如果其中一个是零时间，则返回另一个
 func minNonzeroTime(a, b time.Time) time.Time {
 	if a.IsZero() {
 		return b
@@ -87,6 +88,7 @@ func minNonzeroTime(a, b time.Time) time.Time {
 //   - d.Deadline
 //   - the context's deadline
 // Or zero, if none of Timeout, Deadline, or context's deadline is set.
+// [Min] 返回该 Dialer 的 deadline，考虑了 Timeout，Deadline，和 context deadline，取最早的一个
 func (d *Dialer) deadline(ctx context.Context, now time.Time) (earliest time.Time) {
 	if d.Timeout != 0 { // including negative, for historical reasons
 		earliest = now.Add(d.Timeout)
@@ -97,6 +99,7 @@ func (d *Dialer) deadline(ctx context.Context, now time.Time) (earliest time.Tim
 	return minNonzeroTime(earliest, d.Deadline)
 }
 
+// [Min] 返回Resolver，如果为 nil，则返回DefaultResolver，零值
 func (d *Dialer) resolver() *Resolver {
 	if d.Resolver != nil {
 		return d.Resolver
@@ -106,6 +109,9 @@ func (d *Dialer) resolver() *Resolver {
 
 // partialDeadline returns the deadline to use for a single address,
 // when multiple addresses are pending.
+// [Min] 对于多个地址未处理地址的情况下，单个地址的 deadline
+// [Min] 首先计算出离最终 deadline 的总剩余时间，再尝试将这段时间平均分配给每个地址，
+// [Min] 如果这个时间太短（< 2s），则取2s 和总剩余时间的最小值给当前处理地址，计算出 deadline 返回
 func partialDeadline(now, deadline time.Time, addrsRemaining int) (time.Time, error) {
 	if deadline.IsZero() {
 		return deadline, nil
@@ -128,6 +134,7 @@ func partialDeadline(now, deadline time.Time, addrsRemaining int) (time.Time, er
 	return now.Add(timeout), nil
 }
 
+// [Min] 如果定义了FallbackDelay > 0，直接返回，否则以300 ms 返回
 func (d *Dialer) fallbackDelay() time.Duration {
 	if d.FallbackDelay > 0 {
 		return d.FallbackDelay
@@ -183,16 +190,20 @@ func parseNetwork(ctx context.Context, network string, needsProto bool) (afnet s
 // resolveAddrList resolves addr using hint and returns a list of
 // addresses. The result contains at least one address when error is
 // nil.
+// [Min] 根据 hint Addr，返回 addrList，hint 相当于一个参照地址，一般为本地地址，而 addr 为目标地址
 func (r *Resolver) resolveAddrList(ctx context.Context, op, network, addr string, hint Addr) (addrList, error) {
+	// [Min] 解析 network
 	afnet, _, err := parseNetwork(ctx, network, true)
 	if err != nil {
 		return nil, err
 	}
+	// [Min] 对应 dial 操作，addr 不能为空
 	if op == "dial" && addr == "" {
 		return nil, errMissingAddress
 	}
 	switch afnet {
 	case "unix", "unixgram", "unixpacket":
+		// [Min] 返回UnixAddr
 		addr, err := ResolveUnixAddr(afnet, addr)
 		if err != nil {
 			return nil, err
@@ -203,6 +214,7 @@ func (r *Resolver) resolveAddrList(ctx context.Context, op, network, addr string
 		return addrList{addr}, nil
 	}
 	addrs, err := r.internetAddrList(ctx, afnet, addr)
+	// [Min] 如果没有 hint 或者不是 dial，或者报错了，直接返回
 	if err != nil || op != "dial" || hint == nil {
 		return addrs, err
 	}
@@ -224,6 +236,9 @@ func (r *Resolver) resolveAddrList(ctx context.Context, op, network, addr string
 		wildcard = ip.isWildcard()
 	}
 	naddrs := addrs[:0]
+	// [Min] 将 addrList 中的每个 addr 与 hint 做比较
+	// [Min] 首先必须 network 相同，否则报错
+	// [Min] 其次，当addr 和 hint 包含的 IP 都不是全0 ip，但却不是同类型 ip 的时候，忽略该地址
 	for _, addr := range addrs {
 		if addr.Network() != hint.Network() {
 			return nil, &AddrError{Err: "mismatched local address type", Addr: hint.String()}
@@ -298,6 +313,7 @@ func (r *Resolver) resolveAddrList(ctx context.Context, op, network, addr string
 // assumed.
 //
 // For Unix networks, the address must be a file system path.
+// [Min] 以零值 Dialer 进行拨号，返回 Conn
 func Dial(network, address string) (Conn, error) {
 	var d Dialer
 	return d.Dial(network, address)
@@ -313,12 +329,14 @@ func Dial(network, address string) (Conn, error) {
 //
 // See func Dial for a description of the network and address
 // parameters.
+// [Min] 和 Dial 相似，只不过设置了 Dialer 的 Timeout
 func DialTimeout(network, address string, timeout time.Duration) (Conn, error) {
 	d := Dialer{Timeout: timeout}
 	return d.Dial(network, address)
 }
 
 // dialParam contains a Dial's parameters and configuration.
+// [Min] 包含了 Dialer 本身的信息和 Dial 动作必不可少的 network 和 address
 type dialParam struct {
 	Dialer
 	network, address string
@@ -328,6 +346,7 @@ type dialParam struct {
 //
 // See func Dial for a description of the network and address
 // parameters.
+// [Min] 调用DialContext 发起 Dial， 此时会创建一个空的 Context
 func (d *Dialer) Dial(network, address string) (Conn, error) {
 	return d.DialContext(context.Background(), network, address)
 }
@@ -354,28 +373,32 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (Conn
 	if ctx == nil {
 		panic("nil context")
 	}
+	// [Min] 获取 deadline，综合考虑了 d.Timeout,d.Deadline 和 ctx.Deadline()，取最早的一个值
 	deadline := d.deadline(ctx, time.Now())
 	if !deadline.IsZero() {
+		// [Min] 根据此 deadline，同步 context 中的 deadline
 		if d, ok := ctx.Deadline(); !ok || deadline.Before(d) {
 			subCtx, cancel := context.WithDeadline(ctx, deadline)
 			defer cancel()
 			ctx = subCtx
 		}
 	}
+	// [Min] Dialer 本身的 Cancel 通道不为 nil，则继承上述 ctx，当 Cancel 通道收到消息后，执行 cancel()，使得后续继承此 ctx
 	if oldCancel := d.Cancel; oldCancel != nil {
 		subCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		go func() {
 			select {
 			case <-oldCancel:
-				cancel()
-			case <-subCtx.Done():
+				cancel() // subCtx 发起 cancel，并向下传播
+			case <-subCtx.Done(): //父亲 ctx 发起了 cancel
 			}
 		}()
-		ctx = subCtx
+		ctx = subCtx // [Min] 后续在 subCtx 的基础上继续继承下去
 	}
 
 	// Shadow the nettrace (if any) during resolve so Connect events don't fire for DNS lookups.
+	// [Min] 复制一个当前状态下的 ctx，用于取消后续对ConnectStart，ConnectDone调用
 	resolveCtx := ctx
 	if trace, _ := ctx.Value(nettrace.TraceKey{}).(*nettrace.Trace); trace != nil {
 		shadow := *trace
@@ -384,6 +407,7 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (Conn
 		resolveCtx = context.WithValue(resolveCtx, nettrace.TraceKey{}, &shadow)
 	}
 
+	// [Min] 获得 addrList
 	addrs, err := d.resolver().resolveAddrList(resolveCtx, "dial", network, address, d.LocalAddr)
 	if err != nil {
 		return nil, &OpError{Op: "dial", Net: network, Source: nil, Addr: nil, Err: err}
@@ -397,15 +421,19 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (Conn
 
 	var primaries, fallbacks addrList
 	if d.DualStack && network == "tcp" {
+		// [Min] 将 addrs 分为两类，primaries 为所有与第一个地址对应 isIPv4 同真同假的地址，剩余的为 fallbacks
 		primaries, fallbacks = addrs.partition(isIPv4)
 	} else {
 		primaries = addrs
 	}
 
 	var c Conn
+	// [Min] 如果 fallbacks 不为空，几乎同时对 primaries 和 fallbacks 两组进行处理，但是组内还是顺序进行 dial
+	// [Min] 其中 fallbacks 组会根据 d.FallbackDealy 延迟处理
 	if len(fallbacks) > 0 {
 		c, err = dialParallel(ctx, dp, primaries, fallbacks)
 	} else {
+		// [Min] 顺序处理每个地址
 		c, err = dialSerial(ctx, dp, primaries)
 	}
 	if err != nil {
@@ -424,11 +452,14 @@ func (d *Dialer) DialContext(ctx context.Context, network, address string) (Conn
 // head start. It returns the first established connection and
 // closes the others. Otherwise it returns an error from the first
 // primary address.
+// [Min] 两组地址几乎同时开始挨个尝试拨号，返回第一个成功拨号的连接
+// [Min] fallbacks 组会根据fallbackDelay() 延迟开始处理
 func dialParallel(ctx context.Context, dp *dialParam, primaries, fallbacks addrList) (Conn, error) {
 	if len(fallbacks) == 0 {
 		return dialSerial(ctx, dp, primaries)
 	}
 
+	// [Min] 当一个组先得到一个 Conn， returned 用于通知处理另一个较慢的组的 goroutine 结束处理
 	returned := make(chan struct{})
 	defer close(returned)
 
@@ -438,16 +469,24 @@ func dialParallel(ctx context.Context, dp *dialParam, primaries, fallbacks addrL
 		primary bool
 		done    bool
 	}
+	// [Min] 用于接收最快的那个 Conn 的通道，一旦接收到了成功的 Conn，则直接返回
 	results := make(chan dialResult) // unbuffered
 
+	// [Min] 用于竞赛的逻辑，primary 用来区别两组
 	startRacer := func(ctx context.Context, primary bool) {
+		// [Min] 获取对应组别的地址，存入 ras
 		ras := primaries
 		if !primary {
 			ras = fallbacks
 		}
+		// [Min] 组内按顺序拨号，一旦返回，就表示对该组已经处理完成，要么是第一个成功的Conn，要么是第一个错误
 		c, err := dialSerial(ctx, dp, ras)
 		select {
+		// [Min] 及时将拨号结果返回给 results 通道
 		case results <- dialResult{Conn: c, error: err, primary: primary, done: true}:
+		// [Min] fallbacks 组快，结束此 goroutine，
+		// [Min] 但也有可能 primaries 组也已经有成功的 Conn，只是还没来得及返回，
+		// [Min] 这种情况就要关闭这个 Conn
 		case <-returned:
 			if c != nil {
 				c.Close()
@@ -460,32 +499,42 @@ func dialParallel(ctx context.Context, dp *dialParam, primaries, fallbacks addrL
 	// Start the main racer.
 	primaryCtx, primaryCancel := context.WithCancel(ctx)
 	defer primaryCancel()
+	// [Min] 直接开始 primaries 组处理
 	go startRacer(primaryCtx, true)
 
 	// Start the timer for the fallback racer.
+	// [Min] 开启 fallbacks 组 dealy timer
 	fallbackTimer := time.NewTimer(dp.fallbackDelay())
 	defer fallbackTimer.Stop()
 
 	for {
 		select {
 		case <-fallbackTimer.C:
+			// [Min] fallbacks 组开始处理
 			fallbackCtx, fallbackCancel := context.WithCancel(ctx)
 			defer fallbackCancel()
 			go startRacer(fallbackCtx, false)
 
 		case res := <-results:
+			// [Min] 收到较快组的结果，如果没有 error，直接返回此 Conn，
+			// [Min] returned 也会被关闭用于通知另一组结束处理
 			if res.error == nil {
 				return res.Conn, nil
 			}
+			// [Min] 如果有错，根据组暂存此结果
 			if res.primary {
 				primary = res
 			} else {
 				fallback = res
 			}
+			// [Min] 当两个组都完成了处理，且之前都没有返回成功的 Conn，优先返回 primary 组的错误
 			if primary.done && fallback.done {
 				return nil, primary.error
 			}
+			// [Min] 如果 primary 组已经处理完了，且没有成功的 Conn 返回，
+			// [Min] 而此时 fallbacks 组还没开始处理（还在 delay），将此 delay 取消，立即开始处理 fallbacks 组
 			if res.primary && fallbackTimer.Stop() {
+				// [Min] timer.Stop()返回真，说明 timer 还没到时间
 				// If we were able to stop the timer, that means it
 				// was running (hadn't yet started the fallback), but
 				// we just got an error on the primary path, so start
@@ -498,17 +547,20 @@ func dialParallel(ctx context.Context, dp *dialParam, primaries, fallbacks addrL
 
 // dialSerial connects to a list of addresses in sequence, returning
 // either the first successful connection, or the first error.
+// [Min] 对一组地址按顺序进行拨号，返回第一个成功拨号的 Conn，或者第一个碰到的 error
 func dialSerial(ctx context.Context, dp *dialParam, ras addrList) (Conn, error) {
 	var firstErr error // The error from the first address is most relevant.
 
 	for i, ra := range ras {
 		select {
+		// [Min] 超时返回
 		case <-ctx.Done():
 			return nil, &OpError{Op: "dial", Net: dp.network, Source: dp.LocalAddr, Addr: ra, Err: mapErr(ctx.Err())}
 		default:
 		}
 
 		deadline, _ := ctx.Deadline()
+		// [Min] 获取单地址的处理 deadline
 		partialDeadline, err := partialDeadline(time.Now(), deadline, len(ras)-i)
 		if err != nil {
 			// Ran out of time.
@@ -517,6 +569,7 @@ func dialSerial(ctx context.Context, dp *dialParam, ras addrList) (Conn, error) 
 			}
 			break
 		}
+		// [Min] 单地址 ctx
 		dialCtx := ctx
 		if partialDeadline.Before(deadline) {
 			var cancel context.CancelFunc
@@ -524,7 +577,9 @@ func dialSerial(ctx context.Context, dp *dialParam, ras addrList) (Conn, error) 
 			defer cancel()
 		}
 
+		// [Min] 单地址拨号
 		c, err := dialSingle(dialCtx, dp, ra)
+		// [Min] 成功立即返回
 		if err == nil {
 			return c, nil
 		}
@@ -541,6 +596,7 @@ func dialSerial(ctx context.Context, dp *dialParam, ras addrList) (Conn, error) 
 
 // dialSingle attempts to establish and returns a single connection to
 // the destination address.
+// [Min] 根据地址的类型进行单地址拨号
 func dialSingle(ctx context.Context, dp *dialParam, ra Addr) (c Conn, err error) {
 	trace, _ := ctx.Value(nettrace.TraceKey{}).(*nettrace.Trace)
 	if trace != nil {
@@ -552,6 +608,8 @@ func dialSingle(ctx context.Context, dp *dialParam, ra Addr) (c Conn, err error)
 			defer func() { trace.ConnectDone(dp.network, raStr, err) }()
 		}
 	}
+	// [Min] local address 和 remote address 已经在之前 resolveAddrList的时候确保了类型的统一
+	// [Min] 此时只要根据类型选择相应的函数进行 dial
 	la := dp.LocalAddr
 	switch ra := ra.(type) {
 	case *TCPAddr:
@@ -593,12 +651,15 @@ func dialSingle(ctx context.Context, dp *dialParam, ra Addr) (c Conn, err error)
 //
 // See func Dial for a description of the network and address
 // parameters.
+// [Min] 获得对本地指定地址进行监听的 listener，针对 TCP，Unix
 func Listen(network, address string) (Listener, error) {
+	// [Min] 获取 addrList
 	addrs, err := DefaultResolver.resolveAddrList(context.Background(), "listen", network, address, nil)
 	if err != nil {
 		return nil, &OpError{Op: "listen", Net: network, Source: nil, Addr: nil, Err: err}
 	}
 	var l Listener
+	// [Min] 第一个是 IPv4 的地址，根据其类型调用相应的 Listen 函数获得 Listener
 	switch la := addrs.first(isIPv4).(type) {
 	case *TCPAddr:
 		l, err = ListenTCP(network, la)
@@ -635,6 +696,7 @@ func Listen(network, address string) (Listener, error) {
 //
 // See func Dial for a description of the network and address
 // parameters.
+// [Min] 功能与 Listen 类似，针对 UDP，IP，Unixgram
 func ListenPacket(network, address string) (PacketConn, error) {
 	addrs, err := DefaultResolver.resolveAddrList(context.Background(), "listen", network, address, nil)
 	if err != nil {
