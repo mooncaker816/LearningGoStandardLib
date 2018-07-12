@@ -4,6 +4,7 @@
 |----------------|:--------:|:---------:|
 | bufio          |  Yes     |2018-01-10 |
 | bytes          |  Yes     |2018-01-14 |
+| context        |  Yes     |2018-07-12 |
 | encoding/hex   |  Yes     |2018-06-25 |
 | go/scanner     |  Yes     |2018-01-09 |
 | go/token       |  Yes     |2018-01-23 |
