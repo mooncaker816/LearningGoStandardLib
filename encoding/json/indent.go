@@ -21,7 +21,7 @@ func compact(dst *bytes.Buffer, src []byte, escape bool) error {
 	// [Min] 换句话说，当碰到需要跳过的空格，或者需要转义的字符时，将之前累积起来的字符串写入 dst 中
 	start := 0
 	for i, c := range src {
-		// [Min] 将<,>,&写成\u00xx 的形式
+		// [Min] 将<,>,&写成\u00xx 的形式，这三个字符在 html 中为转义标识符
 		if escape && (c == '<' || c == '>' || c == '&') {
 			if start < i {
 				dst.Write(src[start:i])
