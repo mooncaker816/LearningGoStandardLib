@@ -157,7 +157,7 @@ import (
 // an infinite recursion.
 //
 // [Min] 将 Go 类型数据编码为 JSON 字符串
-// [Min] JSON 对象的 key 只能为字符串，所以对于 Go map 类型的数据，键值也必须是字符串
+// [Min] JSON 对象的 key 只能为字符串，所以对于 Go map 类型的数据，键的类型必须是 string，整型，无符号整型，指针类型，实现了 TextMarshaler 接口的类型中的一种
 // [Min] 不支持对 Channel, complex, function 类型进行编码
 // [Min] 不支持循环类的数据结构
 // [Min] 对于指针，会自动解引用，对指向的数据进行编码，如果是 nil，则编码为 null
@@ -281,8 +281,8 @@ var hex = "0123456789abcdef"
 // An encodeState encodes JSON into a bytes.Buffer.
 type encodeState struct {
 	// [Min] 用来存 json 字符串的 buffer
-	bytes.Buffer // accumulated output
-	scratch      [64]byte
+	bytes.Buffer          // accumulated output
+	scratch      [64]byte // [Min] 用于数字编码
 }
 
 var encodeStatePool sync.Pool
@@ -310,6 +310,7 @@ func (e *encodeState) marshal(v interface{}, opts encOpts) (err error) {
 			err = r.(error)
 		}
 	}()
+	// [Min] 调用reflectValue开始编码
 	e.reflectValue(reflect.ValueOf(v), opts)
 	return nil
 }
@@ -318,7 +319,7 @@ func (e *encodeState) error(err error) {
 	panic(err)
 }
 
-// [Min] 根据 v 的具体类型判断是否为空值
+// [Min] 根据 v 的具体类型判断是否为空值，json 串 omitempty 的情况
 func isEmptyValue(v reflect.Value) bool {
 	switch v.Kind() {
 	case reflect.Array, reflect.Map, reflect.Slice, reflect.String:
@@ -343,6 +344,7 @@ func isEmptyValue(v reflect.Value) bool {
 	return false
 }
 
+// [Min] 根据 value 获得对应类型的 encoderFunc 并执行
 func (e *encodeState) reflectValue(v reflect.Value, opts encOpts) {
 	valueEncoder(v)(e, v, opts)
 }
@@ -358,6 +360,7 @@ type encoderFunc func(e *encodeState, v reflect.Value, opts encOpts)
 
 var encoderCache sync.Map // map[reflect.Type]encoderFunc
 
+// [Min] 根据 value 的类型返回 encoderFunc
 func valueEncoder(v reflect.Value) encoderFunc {
 	if !v.IsValid() {
 		return invalidValueEncoder
@@ -419,6 +422,7 @@ func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
 	if t.Implements(marshalerType) {
 		return marshalerEncoder
 	}
+	// [Min] t.Kind()会获取 t 的底层类型，如 type A string 之类的会返回 string
 	// [Min] 如果 t 本身不是指针，并且允许自动解引用地址
 	// [Min] 尝试看指向 t 类型的指针是否实现了 marshaler interface
 	// [Min] 如果是，返回可寻址优先的条件 encoder，优先addrMarshalerEncoder，其次构造一个不可寻址的 encoderFunc
@@ -465,6 +469,7 @@ func newTypeEncoder(t reflect.Type, allowAddr bool) encoderFunc {
 		// [Min] 接口类型数据编码函数interfaceEncoder
 		return interfaceEncoder
 	case reflect.Struct:
+		// [Min] 结构体类型数据编码函数newStructEncoder(t)
 		return newStructEncoder(t)
 	case reflect.Map:
 		return newMapEncoder(t)
@@ -610,6 +615,7 @@ func uintEncoder(e *encodeState, v reflect.Value, opts encOpts) {
 
 type floatEncoder int // number of bits
 
+// [Min] 浮点型数据编码
 func (bits floatEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	f := v.Float()
 	if math.IsInf(f, 0) || math.IsNaN(f) {
@@ -700,48 +706,64 @@ func unsupportedTypeEncoder(e *encodeState, v reflect.Value, _ encOpts) {
 	e.error(&UnsupportedTypeError{v.Type()})
 }
 
+// [Min] 结构体字段encoder
 type structEncoder struct {
-	fields    []field
+	// [Min] 该结构体中所有需要编码的字段信息（已扩展获取了所有匿名字段中的有效字段）
+	fields []field
+	// [Min] fields 中每一字段对应的 encoderFunc
 	fieldEncs []encoderFunc
 }
 
+// [Min] 结构体类型字段编码
 func (se *structEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	e.WriteByte('{')
 	first := true
 	for i, f := range se.fields {
+		// [Min] 根据字段索引结构，调用fieldByIndex获取字段值，同时会检查值是否有效
 		fv := fieldByIndex(v, f.index)
+		// [Min] 忽略无效值和omitEmpty的情况
 		if !fv.IsValid() || f.omitEmpty && isEmptyValue(fv) {
 			continue
 		}
+		// [Min] 字段与字段之间用','分隔
 		if first {
 			first = false
 		} else {
 			e.WriteByte(',')
 		}
+		// [Min] 按字段的 quoted 属性，写入字段名:字段值
 		e.string(f.name, opts.escapeHTML)
 		e.WriteByte(':')
 		opts.quoted = f.quoted
+		// [Min] 调用字段对应的 encoderFunc
 		se.fieldEncs[i](e, fv, opts)
 	}
 	e.WriteByte('}')
 }
 
+// [Min] t 为结构体类型，返回该特定类型的 encoderFunc
 func newStructEncoder(t reflect.Type) encoderFunc {
+	// [Min] 获取该类型 t 下所有需要编码的字段信息
 	fields := cachedTypeFields(t)
 	se := &structEncoder{
 		fields:    fields,
 		fieldEncs: make([]encoderFunc, len(fields)),
 	}
+	// [Min] 调用typeByIndex获取每一个待编码字段的类型，
+	// [Min] 再根据该类型调用typeEncoder获取对应的 encoderFunc
+	// [Min] 存入structEncoder
 	for i, f := range fields {
 		se.fieldEncs[i] = typeEncoder(typeByIndex(t, f.index))
 	}
 	return se.encode
 }
 
+// [Min] map类型 encoder
 type mapEncoder struct {
 	elemEnc encoderFunc
 }
 
+// [Min] map类型字段编码
 func (me *mapEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	if v.IsNil() {
 		e.WriteString("null")
@@ -750,16 +772,20 @@ func (me *mapEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	e.WriteByte('{')
 
 	// Extract and sort the keys.
+	// [Min] 获取 map 中的 key，并 key 必须是 string，整型，无符号整型，指针类型，实现了 TextMarshaler 接口的类型中的一种
 	keys := v.MapKeys()
 	sv := make([]reflectWithString, len(keys))
 	for i, v := range keys {
 		sv[i].v = v
+		// [Min] 获得 key 对应的字符串，用作 json 字段名
 		if err := sv[i].resolve(); err != nil {
 			e.error(&MarshalerError{v.Type(), err})
 		}
 	}
+	// [Min] 按 key 对应的字符串排序
 	sort.Slice(sv, func(i, j int) bool { return sv[i].s < sv[j].s })
 
+	// [Min] 写入键值对，以','分隔
 	for i, kv := range sv {
 		if i > 0 {
 			e.WriteByte(',')
@@ -771,7 +797,9 @@ func (me *mapEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	e.WriteByte('}')
 }
 
+// [Min] t 为 map 类型，返回该 map 类型的 encoderFunc
 func newMapEncoder(t reflect.Type) encoderFunc {
+	// [Min] map key 的类型必须为以下列出的类型或者实现了TextMarshaler接口的类型
 	switch t.Key().Kind() {
 	case reflect.String,
 		reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
@@ -781,15 +809,18 @@ func newMapEncoder(t reflect.Type) encoderFunc {
 			return unsupportedTypeEncoder
 		}
 	}
+	// [Min] t.Elem()获取 map 元素的类型，再调用 typeEncoder，获得该具体类型的 encoderFunc
 	me := &mapEncoder{typeEncoder(t.Elem())}
 	return me.encode
 }
 
+// [Min] byte slice 类型数据编码
 func encodeByteSlice(e *encodeState, v reflect.Value, _ encOpts) {
 	if v.IsNil() {
 		e.WriteString("null")
 		return
 	}
+	// [Min] 获得字节流，以 base64编码写入
 	s := v.Bytes()
 	e.WriteByte('"')
 	if len(s) < 1024 {
@@ -808,10 +839,12 @@ func encodeByteSlice(e *encodeState, v reflect.Value, _ encOpts) {
 }
 
 // sliceEncoder just wraps an arrayEncoder, checking to make sure the value isn't nil.
+// [Min] slice encoder
 type sliceEncoder struct {
 	arrayEnc encoderFunc
 }
 
+// [Min] slice 类型数据编码
 func (se *sliceEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	if v.IsNil() {
 		e.WriteString("null")
@@ -820,8 +853,11 @@ func (se *sliceEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	se.arrayEnc(e, v, opts)
 }
 
+// [Min] t 为 slice 类型，返回该类型对应的 encoderFunc
 func newSliceEncoder(t reflect.Type) encoderFunc {
 	// Byte slices get special treatment; arrays don't.
+	// [Min] 如果是 byte slice，且没有实现 Marshaler，TextMarshaler 接口，则返回encodeByteSlice
+	// [Min] 其余的按 json 数组编码处理
 	if t.Elem().Kind() == reflect.Uint8 {
 		p := reflect.PtrTo(t.Elem())
 		if !p.Implements(marshalerType) && !p.Implements(textMarshalerType) {
@@ -832,10 +868,12 @@ func newSliceEncoder(t reflect.Type) encoderFunc {
 	return enc.encode
 }
 
+// [Min] json 数组 encoder
 type arrayEncoder struct {
 	elemEnc encoderFunc
 }
 
+// [Min] 对每一个元素进行编码，以','分隔，外套[]
 func (ae *arrayEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	e.WriteByte('[')
 	n := v.Len()
@@ -848,15 +886,19 @@ func (ae *arrayEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	e.WriteByte(']')
 }
 
+// [Min] t 为非字节 slice，返回该类型的 encoderFunc
 func newArrayEncoder(t reflect.Type) encoderFunc {
+	// [Min] 通过typeEncoder返回元素对应的 encoderFunc
 	enc := &arrayEncoder{typeEncoder(t.Elem())}
 	return enc.encode
 }
 
+// [Min] 指针 encoder
 type ptrEncoder struct {
 	elemEnc encoderFunc
 }
 
+// [Min] 对指针指向的数据编码
 func (pe *ptrEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	if v.IsNil() {
 		e.WriteString("null")
@@ -865,6 +907,7 @@ func (pe *ptrEncoder) encode(e *encodeState, v reflect.Value, opts encOpts) {
 	pe.elemEnc(e, v.Elem(), opts)
 }
 
+// [Min] t 为指针，t.Elem()获得指向的类型，调用typeEncoder构造该类型对应的 encoderFunc
 func newPtrEncoder(t reflect.Type) encoderFunc {
 	enc := &ptrEncoder{typeEncoder(t.Elem())}
 	return enc.encode
@@ -894,16 +937,20 @@ func newCondAddrEncoder(canAddrEnc, elseEnc encoderFunc) encoderFunc {
 	return enc.encode
 }
 
+// [Min] 判断 json tag name 是否有效
 func isValidTag(s string) bool {
+	// [Min] 空无效
 	if s == "" {
 		return false
 	}
 	for _, c := range s {
 		switch {
+		// [Min] 有效的特殊字符
 		case strings.ContainsRune("!#$%&()*+-./:<=>?@[]^_{|}~ ", c):
 			// Backslash and quote chars are reserved, but
 			// otherwise any punctuation chars are allowed
 			// in a tag name.
+		// [Min] 除去上述有效特殊字符，其他任何非字母，非数字都是无效的
 		default:
 			if !unicode.IsLetter(c) && !unicode.IsDigit(c) {
 				return false
@@ -913,6 +960,7 @@ func isValidTag(s string) bool {
 	return true
 }
 
+// [Min] 根据字段索引结构，获取该字段值
 func fieldByIndex(v reflect.Value, index []int) reflect.Value {
 	for _, i := range index {
 		if v.Kind() == reflect.Ptr {
@@ -926,6 +974,7 @@ func fieldByIndex(v reflect.Value, index []int) reflect.Value {
 	return v
 }
 
+// [Min] 根据字段索引结构，获取该字段的类型
 func typeByIndex(t reflect.Type, index []int) reflect.Type {
 	for _, i := range index {
 		if t.Kind() == reflect.Ptr {
@@ -941,20 +990,25 @@ type reflectWithString struct {
 	s string
 }
 
+// [Min] 用于将 map 的 key 转为 string 型数据
 func (w *reflectWithString) resolve() error {
+	// [Min] 如果本身就是 string，直接调用 String() 即可获得真正的字符串值
 	if w.v.Kind() == reflect.String {
 		w.s = w.v.String()
 		return nil
 	}
+	// [Min] 如果v 实现了TextMarshaler接口，调用MarshalText即可
 	if tm, ok := w.v.Interface().(encoding.TextMarshaler); ok {
 		buf, err := tm.MarshalText()
 		w.s = string(buf)
 		return err
 	}
 	switch w.v.Kind() {
+	// [Min] 如果是整型数据，则转为对应的十进制数值字符串
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		w.s = strconv.FormatInt(w.v.Int(), 10)
 		return nil
+	// [Min] 如果是无符号整型数据或指针，则转为对应的十进制数值字符串
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		w.s = strconv.FormatUint(w.v.Uint(), 10)
 		return nil
@@ -1131,18 +1185,30 @@ func (e *encodeState) stringBytes(s []byte, escapeHTML bool) {
 }
 
 // A field represents a single field found in a struct.
+// [Min] 记录结构体中的一个字段的信息
 type field struct {
-	name      string
-	nameBytes []byte                 // []byte(name)
+	// [Min] 字段名字符串
+	name string
+	// [Min] 字段名字节流
+	nameBytes []byte // []byte(name)
+	// [Min] 用来比较其他字段名是否和该字段名一致的函数
 	equalFold func(s, t []byte) bool // bytes.EqualFold or equivalent
 
-	tag       bool
-	index     []int
-	typ       reflect.Type
+	// [Min] 是否有 tag
+	tag bool
+	// [Min] 该字段所处的索引结构，index 的长度代表该字段的内嵌层次
+	// [Min] 如果该字段位于顶层结构中，则 index 为长度为1的切片，index[0] 为该字段在该结构中的索引
+	// [Min] 如果该字段属于一个内嵌的匿名字段，则 index 包含了该内嵌字段的索引结构 + 该字段在该内嵌结构中的索引，依次向上递推，直到顶层
+	index []int
+	// [Min] 该字段的类型
+	typ reflect.Type
+	// [Min] tag 中是否含有 omitempty
 	omitEmpty bool
-	quoted    bool
+	// [Min] 该字段的值是否可以在 json 串中用引号括起来
+	quoted bool
 }
 
+// [Min] 按 name 更新 nameBytes，并获取用于与该字段比较字段名的比较函数
 func fillField(f field) field {
 	f.nameBytes = []byte(f.name)
 	f.equalFold = foldFunc(f.nameBytes)
@@ -1150,6 +1216,8 @@ func fillField(f field) field {
 }
 
 // byIndex sorts field by index sequence.
+// [Min] 按字段的索引结构排序
+// [Min] 层次深的在后，同层的按字段索引升序排序
 type byIndex []field
 
 func (x byIndex) Len() int { return len(x) }
@@ -1158,76 +1226,110 @@ func (x byIndex) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
 
 func (x byIndex) Less(i, j int) bool {
 	for k, xik := range x[i].index {
+		// [Min] 如果 k 大于等于 j 字段的层次，（理应不在这里出现）
+		// [Min] 说明 i 字段的层次大于 j 字段，i 需在 j 后面，返回 false
 		if k >= len(x[j].index) {
 			return false
 		}
+		// [Min] 如果索引结构中有一个索引不同，说明这两个字段分属两个分支，
+		// [Min] 按分支先后排序
 		if xik != x[j].index[k] {
 			return xik < x[j].index[k]
 		}
 	}
+	// [Min] 如果 i 的索引结构为 j 的索引结构的"prefix"，说明 j 的层次至少和 i 相同，可能更深
 	return len(x[i].index) < len(x[j].index)
 }
 
 // typeFields returns a list of fields that JSON should recognize for the given type.
 // The algorithm is breadth-first search over the set of structs to include - the top struct
 // and then any reachable anonymous structs.
+// [Min] 返回类型 t 中需要编码为 JSON 串的字段，搜索以广度优先，返回结构按字段索引结构排序
 func typeFields(t reflect.Type) []field {
 	// Anonymous fields to explore at the current level and the next.
+	// [Min] 用来记录匿名字段，current 表示当前层次包含的匿名字段，next 表示下一层包含的匿名字段
+	// [Min] 起始 next 为最外层类型，也当成一个匿名字段来开启层次扫描
 	current := []field{}
 	next := []field{{typ: t}}
 
 	// Count of queued names for current level and the next.
+	// [Min] count 用来记录当前层中需要编码的某一类型字段的数量
+	// [Min] nextCount 用来记录下一层中需要编码的某一类型字段的数量
 	count := map[reflect.Type]int{}
 	nextCount := map[reflect.Type]int{}
 
 	// Types already visited at an earlier level.
+	// [Min] visited 用来记录该类型的字段是否已经在之前层次中遇到过
 	visited := map[reflect.Type]bool{}
 
 	// Fields found.
 	var fields []field
 
+	// [Min] 只要还有下一层匿名字段，且符合编码条件，继续循环
+	// [Min] next 会在当前层处理完后进行赋值
 	for len(next) > 0 {
 		current, next = next, current[:0]
 		count, nextCount = nextCount, map[reflect.Type]int{}
 
+		// [Min] 对当前层每一个匿名类型进行处理，f 为某一类型的匿名字段
 		for _, f := range current {
+			// [Min] 如果该类型已经在之前的层次中出现过，则跳过此类型
 			if visited[f.typ] {
 				continue
 			}
+			// [Min] 标记该类型为 visited
 			visited[f.typ] = true
 
 			// Scan f.typ for fields to include.
+			// [Min] 对该类型中的每一个字段进行处理
 			for i := 0; i < f.typ.NumField(); i++ {
 				sf := f.typ.Field(i)
+				// [Min] 首先根据导出规则，检查该字段是否需要忽略：
+				// [Min] 匿名的字段，直接忽略不可导出的非结构体类型字段，如匿名的 string，int 等
+				// [Min] 非匿名字段，直接忽略不可导出的字段
+
+				// [Min] PkgPath 用来记录不可导出的字段的对应的 package 路径
+				// [Min] 为空，说明可导出
 				isUnexported := sf.PkgPath != ""
 				if sf.Anonymous {
+					// [Min] 如果是一个匿名字段，获取他对应的类型
 					t := sf.Type
+					// [Min] 如果他是一个指针，获取他指向的那个类型
 					if t.Kind() == reflect.Ptr {
 						t = t.Elem()
 					}
+					// [Min] 如果该字段不可导出，且不是结构体类型，忽略，继续下一个字段的处理
 					if isUnexported && t.Kind() != reflect.Struct {
 						// Ignore embedded fields of unexported non-struct types.
 						continue
 					}
+					// [Min] 注意此处不能忽略不可导出的结构体类型，因为字段可能是可导出的
+					// [Min] 而又因为该不可导出的结构体类型是匿名的，导致它们包含的可导出的字段是可导出的
 					// Do not ignore embedded fields of unexported struct types
 					// since they may have exported fields.
 				} else if isUnexported {
+					// [Min] 非匿名的不可导出字段，直接忽略
 					// Ignore unexported non-embedded fields.
 					continue
 				}
+				// [Min] 获取该字段对应的 json tag，如果是'-'，忽略该字段
 				tag := sf.Tag.Get("json")
 				if tag == "-" {
 					continue
 				}
+				// [Min] 解析 tag，获得 json 编码字段名和选项
 				name, opts := parseTag(tag)
+				// [Min] 如果 name 无效，置空
 				if !isValidTag(name) {
 					name = ""
 				}
+				// [Min] 记录下该字段的索引
 				index := make([]int, len(f.index)+1)
 				copy(index, f.index)
 				index[len(f.index)] = i
 
 				ft := sf.Type
+				// [Min] 对指针字段解引用
 				if ft.Name() == "" && ft.Kind() == reflect.Ptr {
 					// Follow pointer.
 					ft = ft.Elem()
@@ -1235,6 +1337,8 @@ func typeFields(t reflect.Type) []field {
 
 				// Only strings, floats, integers, and booleans can be quoted.
 				quoted := false
+				// [Min] 如果 tag 含有 string 选项，且该字段类型为strings, floats, integers, booleans中一种，
+				// [Min] 编码时会加引号
 				if opts.Contains("string") {
 					switch ft.Kind() {
 					case reflect.Bool,
@@ -1247,11 +1351,17 @@ func typeFields(t reflect.Type) []field {
 				}
 
 				// Record found field and index sequence.
+				// [Min] 当 tag name 有效，
+				// [Min] 或者该子字段不是匿名字段（此时已经排除了非匿名的不可导字段）
+				// [Min] 或者该子字段不是结构体类型
+				// [Min] 该字段需要在 json 串中编码（可能为一个结构体，需要在 json 串中显示的对其 key 进行编码显示）
 				if name != "" || !sf.Anonymous || ft.Kind() != reflect.Struct {
 					tagged := name != ""
+					// [Min] 如果没有有效的 tag name，使用结构体中的字段名作为 json 字段名
 					if name == "" {
 						name = sf.Name
 					}
+					// [Min] 构造 filed，添加到返回的 fileds 中
 					fields = append(fields, fillField(field{
 						name:      name,
 						tag:       tagged,
@@ -1270,9 +1380,15 @@ func typeFields(t reflect.Type) []field {
 					continue
 				}
 
+				// [Min] 剩下的是那些既没有有效 tag，又是匿名的结构体的字段，需要进行下一层扫描
+				// [Min] 将其写入下一层扫描的匿名字段切片中，继续下一层扫描
+				// [Min] 由于 ft 是对指针解引用后的类型，所以对于同一结构中包含的匿名字段如 A 和 *A 来说，
+				// [Min] 我们只需要扫描一次就可以了（ json 编码的结构是一样的），再由 count 来
 				// Record new anonymous struct to explore in next round.
 				nextCount[ft]++
 				if nextCount[ft] == 1 {
+					// [Min] 以类型的名字作为匿名字段名，保留当前的索引结构（内嵌层次+字段层次索引），
+					// [Min] 后续对于以该类型为匿名字段的子字段，在此 index 的基础上来建立索引结构
 					next = append(next, fillField(field{name: ft.Name(), index: index, typ: ft}))
 				}
 			}
@@ -1284,15 +1400,19 @@ func typeFields(t reflect.Type) []field {
 		// sort field by name, breaking ties with depth, then
 		// breaking ties with "name came from json tag", then
 		// breaking ties with index sequence.
+		// [Min] 先按 json 字段名升序排序
 		if x[i].name != x[j].name {
 			return x[i].name < x[j].name
 		}
+		// [Min] 对于同名的字段，按该字段的层次升序排序
 		if len(x[i].index) != len(x[j].index) {
 			return len(x[i].index) < len(x[j].index)
 		}
+		// [Min] 如果层次也相同，有有效 tag 的字段排在前面
 		if x[i].tag != x[j].tag {
 			return x[i].tag
 		}
+		// [Min] 如果都有有效 tag，按索引结构排
 		return byIndex(x).Less(i, j)
 	})
 
@@ -1308,16 +1428,19 @@ func typeFields(t reflect.Type) []field {
 		// Find the sequence of fields with the name of this first field.
 		fi := fields[i]
 		name := fi.name
+		// [Min] 获取下一个拥有不同 json 字段名的索引的增量 advance
 		for advance = 1; i+advance < len(fields); advance++ {
 			fj := fields[i+advance]
 			if fj.name != name {
 				break
 			}
 		}
+		// [Min] 如果没有同名字段，直接写入 out
 		if advance == 1 { // Only one field with this name
 			out = append(out, fi)
 			continue
 		}
+		// [Min] 对同名字段进行处理，获取一个优先级最高的字段，写入 out
 		dominant, ok := dominantField(fields[i : i+advance])
 		if ok {
 			out = append(out, dominant)
@@ -1325,6 +1448,7 @@ func typeFields(t reflect.Type) []field {
 	}
 
 	fields = out
+	// [Min] 最后按索引结构排序返回（之前名字优先，用于同名字段的筛选）
 	sort.Sort(byIndex(fields))
 
 	return fields
@@ -1336,35 +1460,43 @@ func typeFields(t reflect.Type) []field {
 // JSON tags. If there are multiple top-level fields, the boolean
 // will be false: This condition is an error in Go and we skip all
 // the fields.
+// [Min] 在同名按层次按 tag 优先按索引结构排序的字段中，挑选优先级最高的字段返回
 func dominantField(fields []field) (field, bool) {
 	// The fields are sorted in increasing index-length order. The winner
 	// must therefore be one with the shortest index length. Drop all
 	// longer entries, which is easy: just truncate the slice.
+	// [Min] 获取第一个字段的层次（最低层），胜出者必须为同层次字段
 	length := len(fields[0].index)
 	tagged := -1 // Index of first tagged field.
 	for i, f := range fields {
+		// [Min] 选出同层次字段
 		if len(f.index) > length {
 			fields = fields[:i]
 			break
 		}
 		if f.tag {
+			// [Min] 如果同层中有不止一个 tag name 相同的字段，返回空
 			if tagged >= 0 {
 				// Multiple tagged fields at the same level: conflict.
 				// Return no field.
 				return field{}, false
 			}
+			// [Min] 记录下同层中第一个 tagged 的字段索引
 			tagged = i
 		}
 	}
+	// [Min] 同层同名只有一个 tagged 字段，返回该字段
 	if tagged >= 0 {
 		return fields[tagged], true
 	}
 	// All remaining fields have the same length. If there's more than one,
 	// we have a conflict (two fields named "X" at the same level) and we
 	// return no field.
+	// [Min] 同层，同名，且都没有有效 tag 的字段多余1个，无法确定优先级，返回空
 	if len(fields) > 1 {
 		return field{}, false
 	}
+	// [Min] 最低层只有一个字段，返回该字段
 	return fields[0], true
 }
 
@@ -1374,6 +1506,7 @@ var fieldCache struct {
 }
 
 // cachedTypeFields is like typeFields but uses a cache to avoid repeated work.
+// [Min] 返回类型 t 中的字段，优先从fieldCache中搜索
 func cachedTypeFields(t reflect.Type) []field {
 	m, _ := fieldCache.value.Load().(map[reflect.Type][]field)
 	f := m[t]
@@ -1383,13 +1516,16 @@ func cachedTypeFields(t reflect.Type) []field {
 
 	// Compute fields without lock.
 	// Might duplicate effort but won't hold other computations back.
+	// [Min] 调用 typeFields 返回需要编码的字段信息
 	f = typeFields(t)
 	if f == nil {
 		f = []field{}
 	}
 
+	// [Min] 将刚获得的 t 类型对应的需要编码的字段信息存入fieldCache中
 	fieldCache.mu.Lock()
 	m, _ = fieldCache.value.Load().(map[reflect.Type][]field)
+	// [Min] 深度拷贝原来的 map
 	newM := make(map[reflect.Type][]field, len(m)+1)
 	for k, v := range m {
 		newM[k] = v
