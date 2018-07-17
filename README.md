@@ -16,3 +16,4 @@
 | strconv        |  No      |           |
 | strings        |  Yes     |2018-01-15 |
 | text/scanner   |  Yes     |2018-01-09 |
+| unicode        |  Yes     |2018-07-17 |
