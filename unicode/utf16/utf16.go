@@ -25,8 +25,24 @@ const (
 	surrSelf = 0x10000
 )
 
+/* [Min]
+UTF-16 编码的字符由2个或4个字节构成，
+U+0000至U+D7FF的 unicode 的码点值和 UTF-16 的码点值相同，只需将 unicode 的码值等效转为2个字节的码值即可
+U+E000至U+FFFF的 unicode 的码点值和 UTF-16 的码点值相同，只需将 unicode 的码值等效转为2个字节的码值即可
+U+10000到U+10FFFF的 unicode 字符对应的 UTF-16 编码由一对代理码点构成，
+其中高代理码点取值范围是0xD800-0xDBFF，低代理码点取值范围是0xDC00-0xDFFF，
+将这一对码点（共32位4个字节）作为一个整体当成 UTF-16 对该字符的编码
+
+Unicode 0x10437 对应的代理码点的计算：
+1. 0x10437减去0x10000,结果为0x00437,二进制为 0000 0000 0100 0011 0111。
+2. 分区它的上10位值和下10位值（使用二进制）:0000000001 and 0000110111。
+3. 添加0xD800到上值，以形成高位：0xD800 + 0x0001 = 0xD801。
+4. 添加0xDC00到下值，以形成低位：0xDC00 + 0x0037 = 0xDC37。
+*/
+
 // IsSurrogate reports whether the specified Unicode code point
 // can appear in a surrogate pair.
+// [Min] 判断 unicode 码点是否为代理码点
 func IsSurrogate(r rune) bool {
 	return surr1 <= r && r < surr3
 }
@@ -34,6 +50,7 @@ func IsSurrogate(r rune) bool {
 // DecodeRune returns the UTF-16 decoding of a surrogate pair.
 // If the pair is not a valid UTF-16 surrogate pair, DecodeRune returns
 // the Unicode replacement code point U+FFFD.
+// [Min] 根据高代理码点 r1 和低代理码点 r2，返回对应的 unicode 码点
 func DecodeRune(r1, r2 rune) rune {
 	if surr1 <= r1 && r1 < surr2 && surr2 <= r2 && r2 < surr3 {
 		return (r1-surr1)<<10 | (r2 - surr2) + surrSelf
@@ -44,6 +61,8 @@ func DecodeRune(r1, r2 rune) rune {
 // EncodeRune returns the UTF-16 surrogate pair r1, r2 for the given rune.
 // If the rune is not a valid Unicode code point or does not need encoding,
 // EncodeRune returns U+FFFD, U+FFFD.
+// [Min] 对 unicode 进行 UTF-16 编码，返回对应的代理码点，
+// [Min] 如果 unicode 本身不需要代理码点来表示，返回replacementChar
 func EncodeRune(r rune) (r1, r2 rune) {
 	if r < surrSelf || r > maxRune {
 		return replacementChar, replacementChar
@@ -53,8 +72,10 @@ func EncodeRune(r rune) (r1, r2 rune) {
 }
 
 // Encode returns the UTF-16 encoding of the Unicode code point sequence s.
+// [Min] 将 unicode 编码为 UTF-16
 func Encode(s []rune) []uint16 {
 	n := len(s)
+	// [Min] 先根据需要代理的 unicode 码点的个数计算出返回切片的长度
 	for _, v := range s {
 		if v >= surrSelf {
 			n++
@@ -67,15 +88,18 @@ func Encode(s []rune) []uint16 {
 		switch {
 		case 0 <= v && v < surr1, surr3 <= v && v < surrSelf:
 			// normal rune
+			// [Min] 正常的直接按照 uint16 双字节转换即可
 			a[n] = uint16(v)
 			n++
 		case surrSelf <= v && v <= maxRune:
 			// needs surrogate sequence
+			// [Min] 需要代理的码点，写入 uint16 类型的高低两个代理码点值
 			r1, r2 := EncodeRune(v)
 			a[n] = uint16(r1)
 			a[n+1] = uint16(r2)
 			n += 2
 		default:
+			// [Min] 其他写入 replacementChar
 			a[n] = uint16(replacementChar)
 			n++
 		}
@@ -85,6 +109,7 @@ func Encode(s []rune) []uint16 {
 
 // Decode returns the Unicode code point sequence represented
 // by the UTF-16 encoding s.
+// [Min] 将 UTF-16 解码为 unicode
 func Decode(s []uint16) []rune {
 	a := make([]rune, len(s))
 	n := 0
