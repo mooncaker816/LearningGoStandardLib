@@ -9,6 +9,7 @@
 | encoding/json  |  ^ decode/stream      |2018-07-16 |
 | go/scanner     |  Yes     |2018-01-09 |
 | go/token       |  Yes     |2018-01-23 |
+| net/http       |  ^ filetransport/h2_bundle     |2018-07-12 |
 | net/textproto  |  Yes     |2018-07-03 |
 | net/url        |  Yes     |2018-06-28 |
 | path           |  Yes     |2018-06-26 |
