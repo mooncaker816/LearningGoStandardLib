@@ -16,6 +16,19 @@ const (
 	MaxLatin1       = '\u00FF'     // maximum Latin-1 value.
 )
 
+// [Min] Unicode 码点分布情况
+// 	平面		始末字符值			中文名称							英文名称
+// 0号平面	U+0000 - U+FFFF		基本多文种平面				Basic Multilingual Plane，简称BMP
+// 1号平面	U+10000 - U+1FFFF	多文种补充平面				Supplementary Multilingual Plane，简称SMP
+// 2号平面	U+20000 - U+2FFFF	表意文字补充平面			Supplementary Ideographic Plane，简称SIP
+// 3号平面	U+30000 - U+3FFFF	表意文字第三平面			Tertiary Ideographic Plane，简称TIP
+// 4号平面
+// 至
+// 13号平面	U+40000 - U+DFFFF	（尚未使用）
+// 14号平面	U+E0000 - U+EFFFF	特别用途补充平面			Supplementary Special-purpose Plane，简称SSP
+// 15号平面	U+F0000 - U+FFFFF	保留作为私人使用区（A区）	Private Use Area-A，简称PUA-A
+// 16号平面	U+100000 - U+10FFFF	保留作为私人使用区（B区）	Private Use Area-B，简称PUA-B
+
 // RangeTable defines a set of Unicode code points by listing the ranges of
 // code points within the set. The ranges are listed in two slices
 // to save space: a slice of 16-bit ranges and a slice of 32-bit ranges.
