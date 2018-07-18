@@ -6,6 +6,7 @@
 | bytes          |  Yes     |2018-01-14 |
 | context        |  Yes     |2018-07-12 |
 | encoding/hex   |  Yes     |2018-06-25 |
+| encoding/json  |  ^ decode/stream      |2018-07-16 |
 | go/scanner     |  Yes     |2018-01-09 |
 | go/token       |  Yes     |2018-01-23 |
 | net/textproto  |  Yes     |2018-07-03 |
