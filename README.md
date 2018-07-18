@@ -18,3 +18,4 @@
 | text/scanner   |  Yes     |2018-01-09 |
 | unicode        |  Yes     |2018-07-17 |
 | unicode/utf8   |  Yes     |2018-07-18 |
+| unicode/utf16  |  Yes     |2018-07-18 |
