@@ -5,6 +5,7 @@
 | bufio          |  Yes     |2018-01-10 |
 | bytes          |  Yes     |2018-01-14 |
 | context        |  Yes     |2018-07-12 |
+| encoding/binary|  Yes     |2018-07-18 |
 | encoding/hex   |  Yes     |2018-06-25 |
 | encoding/json  |  ^ decode/stream      |2018-07-16 |
 | go/scanner     |  Yes     |2018-01-09 |
