@@ -5,6 +5,8 @@
 | bufio          |  Yes     |2018-01-10 |
 | bytes          |  Yes     |2018-01-14 |
 | context        |  Yes     |2018-07-12 |
+| crypto         |  Yes     |2018-07-19 |
+| crypto/md5     |  Yes     |2018-07-19 |
 | encoding/binary|  Yes     |2018-07-18 |
 | encoding/hex   |  Yes     |2018-06-25 |
 | encoding/json  |  ^ decode/stream      |2018-07-16 |
