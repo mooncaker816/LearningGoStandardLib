@@ -228,7 +228,7 @@ func (d *digest) checkSum() [Size]byte {
 
 	// Length in bits.
 	// [Min] 将字节长度转为 bit 位长，再将其存入8个字节中，代表一个 uint64 值
-	// [Min] 再将这8个字节填入剩余部分，构成最后一个分块
+	// [Min] 再将这8个字节填入剩余部分，构成最后一个分块（小字节序）
 	len <<= 3
 	for i := uint(0); i < 8; i++ {
 		tmp[i] = byte(len >> (8 * i))

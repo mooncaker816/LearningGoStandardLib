@@ -57,8 +57,8 @@ func blockGeneric(dig *digest, p []byte) {
 		}
 
 		/* [Min]
-		F(X,Y,Z)=(X&Y)|((~X)&Z)
-		G(X,Y,Z)=(X&Z)|(Y&(~Z))
+		F(X,Y,Z)=(X&Y)|((~X)&Z) <=>  Z xor (X and (Y xor Z)) 后者更高效
+		G(X,Y,Z)=(X&Z)|(Y&(~Z)) <=>  Y xor (Z and (X xor Y)) 后者更高效
 		H(X,Y,Z)=X^Y^Z
 		I(X,Y,Z)=Y^(X|(~Z))
 
