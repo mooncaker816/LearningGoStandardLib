@@ -36,7 +36,7 @@ func blockGeneric(dig *digest, p []byte) {
 		// [Min] 备份未处理当前分块前的值
 		aa, bb, cc, dd := a, b, c, d
 
-		// [Min] 首先根据系统，按不同的字节序从 p 中获取一个分块的数据（64字节512位）存入 X
+		// [Min] 首先根据系统，都按小字节序从 p 中获取一个分块的数据（64字节512位）存入 X
 		// [Min] 分成16个小组，每个小组32位
 		// This is a constant condition - it is not evaluated on each iteration.
 		if x86 {

@@ -240,7 +240,7 @@ func (d *digest) checkSum() [Size]byte {
 		panic("d.nx != 0")
 	}
 
-	// [Min] 所有分块都处理完后，将最终128位摘要信息写入对应的16个字节的变量返回
+	// [Min] 所有分块都处理完后，将最终128位摘要信息按小字节序写入对应的16个字节的变量返回
 	var digest [Size]byte
 	for i, s := range d.s {
 		digest[i*4] = byte(s)
