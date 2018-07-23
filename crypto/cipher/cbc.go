@@ -74,7 +74,7 @@ func (x *cbcEncrypter) CryptBlocks(dst, src []byte) {
 	// [Min] 循环处理每一组明文
 	for len(src) > 0 {
 		// Write the xor to dst, then encrypt in place.
-		// [Min] 首先异或初始向量和分组明文
+		// [Min] 首先异或前一组密文（初始向量）和分组明文
 		xorBytes(dst[:x.blockSize], src[:x.blockSize], iv)
 		// [Min] 调用Block的Encrypt方法对该组明文进行加密
 		x.b.Encrypt(dst[:x.blockSize], dst[:x.blockSize])
