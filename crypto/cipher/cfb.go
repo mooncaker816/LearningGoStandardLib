@@ -37,7 +37,7 @@ func (x *cfb) XORKeyStream(dst, src []byte) {
 		}
 
 		// [Min] 如果是解密，则从src中取出该分组密文存入next中
-		// [Min] 理论上，如果是解密的话，可以想OFB模式一样一次计算出多个密钥流，
+		// [Min] 理论上，如果是解密的话，可以像OFB模式一样一次计算出多个密钥流，
 		// [Min] 但是这里并没有实现，next的长度还是blockSize
 		if x.decrypt {
 			// We can precompute a larger segment of the
