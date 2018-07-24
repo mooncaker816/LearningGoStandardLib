@@ -7,6 +7,7 @@
 | context        |  Yes     |2018-07-12 |
 | crypto         |  Yes     |2018-07-19 |
 | crypto/cipher  |  Yes     |2018-07-23 |
+| crypto/des     |  Yes     |2018-07-24 |
 | crypto/md5     |  Yes     |2018-07-19 |
 | crypto/sha1    |  Yes     |2018-07-19 |
 | crypto/sha256  |  Yes     |2018-07-20 |
