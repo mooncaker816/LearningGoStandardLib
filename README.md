@@ -16,6 +16,7 @@
 | encoding/binary|  Yes     |2018-07-18 |
 | encoding/hex   |  Yes     |2018-06-25 |
 | encoding/json  |  ^ decode/stream      |2018-07-16 |
+| flag           |  Yes     |2018-07-26 |
 | go/scanner     |  Yes     |2018-01-09 |
 | go/token       |  Yes     |2018-01-23 |
 | net/http       |  ^ filetransport/h2_bundle     |2018-07-12 |
