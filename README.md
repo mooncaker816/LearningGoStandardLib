@@ -9,6 +9,7 @@
 | crypto/aes     |  Yes     |2018-07-25 |
 | crypto/cipher  |  Yes     |2018-07-23 |
 | crypto/des     |  Yes     |2018-07-24 |
+| crypto/hmac    |  Yes     |2018-07-31 |
 | crypto/md5     |  Yes     |2018-07-19 |
 | crypto/sha1    |  Yes     |2018-07-19 |
 | crypto/sha256  |  Yes     |2018-07-20 |
