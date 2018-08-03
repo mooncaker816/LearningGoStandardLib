@@ -81,7 +81,7 @@ func (c *Conn) serverHandshake() error {
 		if err := hs.sendFinished(c.serverFinished[:]); err != nil {
 			return err
 		}
-		// [Min] 推送底层 conn 的缓存
+		// [Min] 推送 c.sendBuf 中累积的消息到客户端，依次包括：serverHelloMsg，newSessionTicketMsg（可选），finishedMsg。
 		if _, err := c.flush(); err != nil {
 			return err
 		}
@@ -401,10 +401,11 @@ func (hs *serverHandshakeState) doResumeHandshake() error {
 	hs.hello.cipherSuite = hs.suite.id
 	// We echo the client's session ID in the ServerHello to let it know
 	// that we're doing a resumption.
-	// [Min] sessionId 和客户端保持一致
+	// [Min] 重用 session 的情况下，sessionId 和客户端发过来的保持一致，
+	// [Min] 这样客户端就可以通过 sessionId 没有变化来判断 session 的重用
 	hs.hello.sessionId = hs.clientHello.sessionId
 	// [Min] 表明客户端提供的 ticket 是否可以恢复成 sessionState 使用
-	// [Min] 同时也记录 sessionTicket 是否需要以最新的 key 重制刷新（内容不变）
+	// [Min] 同时也记录 sessionTicket 是否需要以最新的 key 重制生成 ticket 来刷新（实际内容不变）
 	hs.hello.ticketSupported = hs.sessionState.usedOldKey
 	hs.finishedHash = newFinishedHash(c.vers, hs.suite)
 	hs.finishedHash.discardHandshakeBuffer()
@@ -452,12 +453,12 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 	// [Min] 计算 clientHelloMsg 和 serverHelloMsg 的 hash
 	hs.finishedHash.Write(hs.clientHello.marshal())
 	hs.finishedHash.Write(hs.hello.marshal())
-	// [Min] 将 serverHelloMsg 写入底层 conn 的缓存
+	// [Min] 将 serverHelloMsg 写入 tls.Conn 的缓存 sendBuf 中
 	if _, err := c.writeRecord(recordTypeHandshake, hs.hello.marshal()); err != nil {
 		return err
 	}
 
-	// [Min] 构造certificateMsg，将服务端证书写入底层 conn 的缓存，累计计算 hash
+	// [Min] 构造certificateMsg，将服务端证书写入缓存 c.sendBuf 中，并完成该消息
 	certMsg := new(certificateMsg)
 	certMsg.certificates = hs.cert.Certificate
 	hs.finishedHash.Write(certMsg.marshal())
@@ -465,7 +466,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		return err
 	}
 
-	// [Min] 如果需要 ocspStapling，构造 certificateStatusMsg，并写入底层 conn 的缓存，累计计算 hash
+	// [Min] 如果需要 ocspStapling，构造 certificateStatusMsg，写入缓存 c.sendBuf 中，并完成该消息
 	if hs.hello.ocspStapling {
 		certStatus := new(certificateStatusMsg)
 		certStatus.statusType = statusTypeOCSP
@@ -485,8 +486,8 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		c.sendAlert(alertHandshakeFailure)
 		return err
 	}
-	// [Min] 如果 skx 不为 nil，说明不是 RSA，累计计算hash，
-	// [Min] 再把 serverKeyExchangeMsg 写入 conn 的缓存
+	// [Min] 如果 skx 不为 nil，说明不是 RSA，
+	// [Min] 再把 serverKeyExchangeMsg 写入缓存 c.sendBuf 中，并完成该消息
 	if skx != nil {
 		hs.finishedHash.Write(skx.marshal())
 		if _, err := c.writeRecord(recordTypeHandshake, skx.marshal()); err != nil {
@@ -532,7 +533,9 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		return err
 	}
 
-	// [Min] 从缓存中将累积的消息推送到客户端
+	// [Min] 从缓存中将累积的消息推送到客户端，依次包括：
+	// [Min] serverHelloMsg，certificateMsg，certificateStatusMsg（可选），
+	// [Min] serverKeyExchangeMsg，certificateRequestMsg（可选），serverHelloDoneMsg
 	if _, err := c.flush(); err != nil {
 		return err
 	}
@@ -807,12 +810,12 @@ func (hs *serverHandshakeState) sendSessionTicket() error {
 func (hs *serverHandshakeState) sendFinished(out []byte) error {
 	c := hs.c
 
-	// [Min] 发送切换信息，此时会将 c.out 中的 cipher 和 mac 切换，转为加密模式
+	// [Min] 发送切换信号，此时会将 c.out 中的 cipher 和 mac 切换，转为加密模式
 	if _, err := c.writeRecord(recordTypeChangeCipherSpec, []byte{1}); err != nil {
 		return err
 	}
 
-	// [Min] 构造 finishedMsg，并序列化，然后写入 conn 缓存
+	// [Min] 构造 finishedMsg，并序列化，然后完成该消息并写入 c.sendBuf 中等待正式发送
 	finished := new(finishedMsg)
 	finished.verifyData = hs.finishedHash.serverSum(hs.masterSecret)
 	hs.finishedHash.Write(finished.marshal())

@@ -247,16 +247,21 @@ func (hs *clientHandshakeState) handshake() error {
 		return err
 	}
 
+	// [Min] 新建客户端的 finishedHash，当一条消息完成后，我们需要将其写入 finishedHash
 	hs.finishedHash = newFinishedHash(c.vers, hs.suite)
 
 	// No signatures of the handshake are needed in a resumption.
 	// Otherwise, in a full handshake, if we don't have any certificates
 	// configured then we will never send a CertificateVerify message and
 	// thus no signatures are needed in that case either.
+	// [Min] 如果是重用 session，或者客户端没有任何证书可以发送，
+	// [Min] 那么也就没有让服务端验证客户端签名一说，我们就不需要记录所有消息
+	// [Min] 直接将 finishedHash 中的 buffer 置为 nil
 	if isResume || (len(c.config.Certificates) == 0 && c.config.GetClientCertificate == nil) {
 		hs.finishedHash.discardHandshakeBuffer()
 	}
 
+	// [Min] 完成 clientHelloMsg 和 serverHelloMsg
 	hs.finishedHash.Write(hs.hello.marshal())
 	hs.finishedHash.Write(hs.serverHello.marshal())
 
@@ -684,7 +689,8 @@ func (hs *clientHandshakeState) processServerHello() (bool, error) {
 	}
 	c.scts = hs.serverHello.scts
 
-	// [Min] 重用 session
+	// [Min] 重用 session，服务端已经根据之前发过去的 ticket 进行了检查，如果可以重用，sessionId 就是之前发过去的 sessionId
+	// [Min] 所以只要比较 clientHelloMsg 和 serverHelloMsg 中的 sessionId 就可以了
 	if !hs.serverResumedSession() {
 		return false, nil
 	}

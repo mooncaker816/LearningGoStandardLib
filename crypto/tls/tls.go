@@ -36,6 +36,7 @@ func Server(conn net.Conn, config *Config) *Conn {
 // using conn as the underlying transport.
 // The config cannot be nil: users must set either ServerName or
 // InsecureSkipVerify in the config.
+// [Min] 封装 TCPConn 为 tls.Conn
 func Client(conn net.Conn, config *Config) *Conn {
 	return &Conn{conn: conn, config: config, isClient: true}
 }

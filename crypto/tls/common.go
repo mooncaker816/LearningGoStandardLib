@@ -635,6 +635,7 @@ func (c *Config) serverInit(originalConfig *Config) {
 		c.sessionTicketKeys = originalConfig.sessionTicketKeys
 		originalConfig.mutex.RUnlock()
 	} else {
+		// [Min] 对c.SessionTicketKey求SHA512，然后再按固定长度分割为 keyName，aesKey，hmacKey
 		c.sessionTicketKeys = []ticketKey{ticketKeyFromBytes(c.SessionTicketKey)}
 	}
 }
