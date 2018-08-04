@@ -265,31 +265,43 @@ func (hs *clientHandshakeState) handshake() error {
 	hs.finishedHash.Write(hs.hello.marshal())
 	hs.finishedHash.Write(hs.serverHello.marshal())
 
+	// [Min] 开启缓存写入模式
 	c.buffering = true
 	if isResume {
+		// [Min] 通过主密钥建立各种秘钥，等待切换
 		if err := hs.establishKeys(); err != nil {
 			return err
 		}
+		// [Min] 调用 readSessionTicket()，读取 ticket 并保存其中 session 的状态
 		if err := hs.readSessionTicket(); err != nil {
 			return err
 		}
+
+		// [Min] 切换输入通道为加密模式，读取服务端 finishedMsg，并验证 verfiyData，存入 serverFinished
 		if err := hs.readFinished(c.serverFinished[:]); err != nil {
 			return err
 		}
+		// [Min] 重用 session 模式下，服务端首先 finish
 		c.clientFinishedIsFirst = false
+		// [Min] 通知服务端切换加密模式，完成 NPN 协议协商，发送 finishedMsg，保存 verifyData
 		if err := hs.sendFinished(c.clientFinished[:]); err != nil {
 			return err
 		}
+		// [Min] 推送消息
 		if _, err := c.flush(); err != nil {
 			return err
 		}
 	} else {
+		// [Min] 非重用 session 模式
+		// [Min] 客户端 fullhandshake
 		if err := hs.doFullHandshake(); err != nil {
 			return err
 		}
+		// [Min] 通过主密钥建立各种秘钥，等待切换
 		if err := hs.establishKeys(); err != nil {
 			return err
 		}
+		// [Min] fullhandshake，客户端先发送 finishedMsg，切换 out 为加密模式
 		if err := hs.sendFinished(c.clientFinished[:]); err != nil {
 			return err
 		}
@@ -297,14 +309,17 @@ func (hs *clientHandshakeState) handshake() error {
 			return err
 		}
 		c.clientFinishedIsFirst = true
+		// [Min] 获取 ticket，保存 ticket 以及 session 状态
 		if err := hs.readSessionTicket(); err != nil {
 			return err
 		}
+		// [Min] 读取服务端的 finishedMsg，并切换 in 为加密模式
 		if err := hs.readFinished(c.serverFinished[:]); err != nil {
 			return err
 		}
 	}
 
+	// [Min] 完成客户端 handshake
 	c.didResume = isResume
 	c.handshakeComplete = true
 
@@ -341,7 +356,7 @@ func (hs *clientHandshakeState) pickCipherSuite() error {
 func (hs *clientHandshakeState) doFullHandshake() error {
 	c := hs.c
 
-	// [Min] 期待收到服务端的证书信息，证书必须存在且不为空
+	// [Min] ServerHelloMsg之后，期待收到服务端的证书信息，证书必须存在且不为空
 	msg, err := c.readHandshake()
 	if err != nil {
 		return err
@@ -351,7 +366,7 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 		c.sendAlert(alertUnexpectedMessage)
 		return unexpectedMessageError(certMsg, msg)
 	}
-	// [Min] 累计计算 hash
+	// [Min] fihishedHash 中完成certificateMsg
 	hs.finishedHash.Write(certMsg.marshal())
 
 	if c.handshakes == 0 {
@@ -398,6 +413,7 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 			}
 		}
 
+		// [Min] 只支持 RSA，ECDSA 的公钥
 		switch certs[0].PublicKey.(type) {
 		case *rsa.PublicKey, *ecdsa.PublicKey:
 			break
@@ -406,9 +422,10 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 			return fmt.Errorf("tls: server's certificate contains an unsupported type of public key: %T", certs[0].PublicKey)
 		}
 
+		// [Min] 保存解析后的证书
 		c.peerCertificates = certs
 	} else {
-		// [Min] 不是首次握手，需确保服务端的证书没有改变
+		// [Min] 不是首次握手，需确保之前存储的服务端的证书没有改变
 		// This is a renegotiation handshake. We require that the
 		// server's identity (i.e. leaf certificate) is unchanged and
 		// thus any previous trust decision is still valid.
@@ -455,14 +472,15 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 		}
 	}
 
-	// [Min] 可能是 serverKeyExchangeMsg，如果采用的是 RSA 交换秘钥的模式，没有 serverKeyExchangeMsg
+	// [Min] 根据套件获取对应的 keyAgreement
 	keyAgreement := hs.suite.ka(c.vers)
 
+	// [Min] 可能是 serverKeyExchangeMsg，如果采用的是 RSA 交换秘钥的模式，没有 serverKeyExchangeMsg
 	skx, ok := msg.(*serverKeyExchangeMsg)
 	if ok {
-		// [Min] 如果是 serverKeyExchangeMsg，先累计计算 hash，再处理
+		// [Min] 如果是 serverKeyExchangeMsg，完成该消息并处理
 		hs.finishedHash.Write(skx.marshal())
-		// [Min] 从 serverKeyExchangeMs 获取服务端公钥，并验证签名
+		// [Min] 从 serverKeyExchangeMsg 获取服务端公钥，并验证签名
 		err = keyAgreement.processServerKeyExchange(c.config, hs.hello, hs.serverHello, c.peerCertificates[0], skx)
 		if err != nil {
 			c.sendAlert(alertUnexpectedMessage)
@@ -482,7 +500,7 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 	// [Min] 此时可能是服务端要求客户端发送证书的请求消息
 	if ok {
 		certRequested = true
-		// [Min] 累计计算 hash
+		// [Min] 完成该消息
 		hs.finishedHash.Write(certReq.marshal())
 
 		// [Min] 根据要求获取客户端的证书
@@ -504,7 +522,7 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 		c.sendAlert(alertUnexpectedMessage)
 		return unexpectedMessageError(shd, msg)
 	}
-	// [Min] 累计 hash
+	// [Min] 完成消息
 	hs.finishedHash.Write(shd.marshal())
 
 	// If the server requested a certificate then we have to send a
@@ -526,7 +544,7 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 		c.sendAlert(alertInternalError)
 		return err
 	}
-	// [Min] 累计计算 hash，并将 clientKeyExchangeMsg 写入 conn 缓存
+	// [Min] 完成消息，并将 clientKeyExchangeMsg 写入 sendBuf，等待推送
 	if ckx != nil {
 		hs.finishedHash.Write(ckx.marshal())
 		if _, err := c.writeRecord(recordTypeHandshake, ckx.marshal()); err != nil {
@@ -568,7 +586,7 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 				return err
 			}
 		}
-		// [Min] 计算 hash
+		// [Min] 计算finishedHash.buffer 的 hash值，作为待签名对象
 		digest, hashFunc, err := hs.finishedHash.hashForClientCertificate(signatureType, certVerify.signatureAlgorithm, hs.masterSecret)
 		if err != nil {
 			c.sendAlert(alertInternalError)
@@ -602,9 +620,11 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 	return nil
 }
 
+// [Min] 根据主密钥建立加密通讯需要的 cipher，hash，更新到客户端和服务端各自对应的 halfConn 的预备字段中，等待切换
 func (hs *clientHandshakeState) establishKeys() error {
 	c := hs.c
 
+	// [Min] 通过主密钥生成一系列计算 mac，加解密需要使用到的 key，和初始化向量
 	clientMAC, serverMAC, clientKey, serverKey, clientIV, serverIV :=
 		keysFromMasterSecret(c.vers, hs.suite, hs.masterSecret, hs.hello.random, hs.serverHello.random, hs.suite.macLen, hs.suite.keyLen, hs.suite.ivLen)
 	var clientCipher, serverCipher interface{}
@@ -619,6 +639,8 @@ func (hs *clientHandshakeState) establishKeys() error {
 		serverCipher = hs.suite.aead(serverKey, serverIV)
 	}
 
+	// [Min] 将 server 的 cipher，hash 算法更新到 in 的预备字段中，等待正式切换
+	// [Min] 将 client 的 cipher，hash 算法更新到 out 的预备字段中，等待正式切换
 	c.in.prepareCipherSpec(c.vers, serverCipher, serverHash)
 	c.out.prepareCipherSpec(c.vers, clientCipher, clientHash)
 	return nil
@@ -707,21 +729,24 @@ func (hs *clientHandshakeState) processServerHello() (bool, error) {
 	}
 
 	// Restore masterSecret and peerCerts from previous state
-	// [Min] session 可以重用，则更新主密钥，证书等
+	// [Min] session 可以重用，则从重用 session 中恢复主密钥，证书等
 	hs.masterSecret = hs.session.masterSecret
 	c.peerCertificates = hs.session.serverCertificates
 	c.verifiedChains = hs.session.verifiedChains
 	return true, nil
 }
 
+// [Min] 切换输入通道为加密模式，读取服务端 finishedMsg，并验证 verfiyData
 func (hs *clientHandshakeState) readFinished(out []byte) error {
 	c := hs.c
 
+	// [Min] 首先读取切换信号，将 c.in 切换为加密模式
 	c.readRecord(recordTypeChangeCipherSpec)
 	if c.in.err != nil {
 		return c.in.err
 	}
 
+	// [Min] 再读取 finishedMsg
 	msg, err := c.readHandshake()
 	if err != nil {
 		return err
@@ -732,23 +757,32 @@ func (hs *clientHandshakeState) readFinished(out []byte) error {
 		return unexpectedMessageError(serverFinished, msg)
 	}
 
+	// [Min] 通过相同的主密钥，相同的算法，截止目前双方理应相同的所有握手信息的 hash 值，
+	// [Min] 计算本地的 verify，再与服务端发送过来的 verifyData 比较，
+	// [Min] 如果不相同，报警
 	verify := hs.finishedHash.serverSum(hs.masterSecret)
 	if len(verify) != len(serverFinished.verifyData) ||
 		subtle.ConstantTimeCompare(verify, serverFinished.verifyData) != 1 {
 		c.sendAlert(alertHandshakeFailure)
 		return errors.New("tls: server's Finished message was incorrect")
 	}
+	// [Min] 完成该 finishedMsg，并存储 verifyData 到 out 中
 	hs.finishedHash.Write(serverFinished.marshal())
 	copy(out, verify)
 	return nil
 }
 
+// [Min] 读取 newSessionTicketMsg，保存 ticket 以及 session 的状态
 func (hs *clientHandshakeState) readSessionTicket() error {
+	// [Min] 注意此处 ticketSupported 是指服务端有没有发送 ticket 过来
+	// [Min] 如果是 fullhandshake，那么只要双方都支持，服务端就会发送
+	// [Min] 如果是重用 session，那么只有在 ticket 需要重制的情况下（加密 ticket 的 key 不是最新的），才会发送
 	if !hs.serverHello.ticketSupported {
 		return nil
 	}
 
 	c := hs.c
+	// [Min] 读取 newSessionTicketMsg
 	msg, err := c.readHandshake()
 	if err != nil {
 		return err
@@ -760,10 +794,13 @@ func (hs *clientHandshakeState) readSessionTicket() error {
 	}
 	hs.finishedHash.Write(sessionTicketMsg.marshal())
 
+	// [Min] 保存 ticket 中 session 对应的状态
 	hs.session = &ClientSessionState{
-		sessionTicket:      sessionTicketMsg.ticket,
-		vers:               c.vers,
-		cipherSuite:        hs.suite.id,
+		sessionTicket: sessionTicketMsg.ticket, // [Min] 服务端发来的新的 ticket
+		vers:          c.vers,
+		cipherSuite:   hs.suite.id,
+		// [Min] 如果是重用session，在决定重用 session 后，以下字段已经率先恢复到 hs，c 中了，
+		// [Min] 所以此处只要从 hs，c 中恢复，就是包含新的 ticket 的 sessionState
 		masterSecret:       hs.masterSecret,
 		serverCertificates: c.peerCertificates,
 		verifiedChains:     c.verifiedChains,
@@ -772,12 +809,15 @@ func (hs *clientHandshakeState) readSessionTicket() error {
 	return nil
 }
 
+// [Min] 客户端通知服务端切换加密模式，完成 NPN 协议协商，发送 finishedMsg
 func (hs *clientHandshakeState) sendFinished(out []byte) error {
 	c := hs.c
 
+	// [Min] 通知服务端切换其输入通道为加密模式，同时切换本端 out 为加密模式
 	if _, err := c.writeRecord(recordTypeChangeCipherSpec, []byte{1}); err != nil {
 		return err
 	}
+	// [Min] 如果是 NPN 模式，协商协议，构造并完成nextProtoMsg，然后发送至 sendBuf，等待正式推送
 	if hs.serverHello.nextProtoNeg {
 		nextProto := new(nextProtoMsg)
 		proto, fallback := mutualProtocol(c.config.NextProtos, hs.serverHello.nextProtos)
@@ -791,12 +831,14 @@ func (hs *clientHandshakeState) sendFinished(out []byte) error {
 		}
 	}
 
+	// [Min] 构造客户端 finishedMsg，完成并发送至 sendBuf，等待正式推送
 	finished := new(finishedMsg)
 	finished.verifyData = hs.finishedHash.clientSum(hs.masterSecret)
 	hs.finishedHash.Write(finished.marshal())
 	if _, err := c.writeRecord(recordTypeHandshake, finished.marshal()); err != nil {
 		return err
 	}
+	// [Min] 保存客户端 verifyData
 	copy(out, finished.verifyData)
 	return nil
 }

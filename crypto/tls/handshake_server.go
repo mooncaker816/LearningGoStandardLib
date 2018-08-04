@@ -486,7 +486,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		c.sendAlert(alertHandshakeFailure)
 		return err
 	}
-	// [Min] 如果 skx 不为 nil，说明不是 RSA，
+	// [Min] 如果 skx 不为 nil，说明不是 RSA，RSA无需发送 serverKeyExchangeMsg
 	// [Min] 再把 serverKeyExchangeMsg 写入缓存 c.sendBuf 中，并完成该消息
 	if skx != nil {
 		hs.finishedHash.Write(skx.marshal())
@@ -535,7 +535,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 
 	// [Min] 从缓存中将累积的消息推送到客户端，依次包括：
 	// [Min] serverHelloMsg，certificateMsg，certificateStatusMsg（可选），
-	// [Min] serverKeyExchangeMsg，certificateRequestMsg（可选），serverHelloDoneMsg
+	// [Min] serverKeyExchangeMsg（非 RSA 秘钥交换），certificateRequestMsg（可选），serverHelloDoneMsg
 	if _, err := c.flush(); err != nil {
 		return err
 	}
@@ -590,10 +590,10 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		c.sendAlert(alertUnexpectedMessage)
 		return unexpectedMessageError(ckx, msg)
 	}
-	// [Min] 累计计算 hash
+	// [Min] 完成消息
 	hs.finishedHash.Write(ckx.marshal())
 
-	// [Min] 此时有了客户端的公钥，就可以生成预备主密钥了
+	// [Min] 此时有了客户端交换秘钥的公钥，就可以生成预备主密钥了
 	preMasterSecret, err := keyAgreement.processClientKeyExchange(c.config, hs.cert, ckx, c.vers)
 	if err != nil {
 		c.sendAlert(alertHandshakeFailure)
@@ -690,7 +690,7 @@ func (hs *serverHandshakeState) doFullHandshake() error {
 		hs.finishedHash.Write(certVerify.marshal())
 	}
 
-	// [Min] 清空 finishedHash 的 buffer
+	// [Min] 客户端证书验证完毕，清空 finishedHash 的 buffer
 	hs.finishedHash.discardHandshakeBuffer()
 
 	return nil
