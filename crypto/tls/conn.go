@@ -22,6 +22,7 @@ import (
 
 // A Conn represents a secured connection.
 // It implements the net.Conn interface.
+// [Min] tls.Conn，封装了一个底层的连接，其他都是 tls 相关信息
 type Conn struct {
 	// constant
 	conn     net.Conn // [Min] 底层的Conn，如 TCPConn
@@ -109,6 +110,7 @@ type Conn struct {
 // Access to net.Conn methods.
 // Cannot just embed net.Conn because that would
 // export the struct field too.
+// [Min] 实现 net.Conn
 
 // LocalAddr returns the local network address.
 func (c *Conn) LocalAddr() net.Addr {
@@ -142,6 +144,7 @@ func (c *Conn) SetWriteDeadline(t time.Time) error {
 
 // A halfConn represents one direction of the record layer
 // connection, either sending or receiving.
+// [Min] halfConn 表示单向的传输通道
 type halfConn struct {
 	sync.Mutex
 
@@ -167,7 +170,7 @@ func (hc *halfConn) setErrorLocked(err error) error {
 
 // prepareCipherSpec sets the encryption and MAC states
 // that a subsequent changeCipherSpec will use.
-// [Min] 将准备使用的 cipher 和 mac 更新到 halfConn
+// [Min] 将准备使用的 cipher 和 mac 更新到 halfConn 的预备字段，等待切换时使用
 func (hc *halfConn) prepareCipherSpec(version uint16, cipher interface{}, mac macFunction) {
 	hc.version = version
 	hc.nextCipher = cipher
@@ -176,7 +179,7 @@ func (hc *halfConn) prepareCipherSpec(version uint16, cipher interface{}, mac ma
 
 // changeCipherSpec changes the encryption and MAC states
 // to the ones previously passed to prepareCipherSpec.
-// [Min] 更新加密，mac 套件，并重置 seq
+// [Min] 将通道切换为加密模式，并重置 seq
 func (hc *halfConn) changeCipherSpec() error {
 	if hc.nextCipher == nil {
 		return alertInternalError
@@ -807,13 +810,16 @@ Again:
 
 // sendAlert sends a TLS alert message.
 // c.out.Mutex <= L.
+// [Min] 发送警告信息
 func (c *Conn) sendAlertLocked(err alert) error {
+	// [Min] 首字节为警告级别
 	switch err {
 	case alertNoRenegotiation, alertCloseNotify:
 		c.tmp[0] = alertLevelWarning
 	default:
 		c.tmp[0] = alertLevelError
 	}
+	// [Min] 第二个字节是警告信息
 	c.tmp[1] = byte(err)
 
 	_, writeErr := c.writeRecordLocked(recordTypeAlert, c.tmp[0:2])
@@ -936,6 +942,7 @@ func (c *Conn) flush() (int, error) {
 	n, err := c.conn.Write(c.sendBuf)
 	c.bytesSent += int64(n)
 	c.sendBuf = nil
+	// [Min] flush 完后会关闭缓存写入模式
 	c.buffering = false
 	return n, err
 }

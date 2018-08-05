@@ -42,14 +42,16 @@ const (
 // TLS record types.
 type recordType uint8
 
+// [Min] TLS 记录层数据类型
 const (
-	recordTypeChangeCipherSpec recordType = 20
-	recordTypeAlert            recordType = 21
-	recordTypeHandshake        recordType = 22
-	recordTypeApplicationData  recordType = 23
+	recordTypeChangeCipherSpec recordType = 20 // [Min] 加密切换信号
+	recordTypeAlert            recordType = 21 // [Min] 警告信息
+	recordTypeHandshake        recordType = 22 // [Min] 握手信息
+	recordTypeApplicationData  recordType = 23 // [Min] 应用数据
 )
 
 // TLS handshake message types.
+// [Min] 握手信息的细类
 const (
 	typeHelloRequest       uint8 = 0
 	typeClientHello        uint8 = 1

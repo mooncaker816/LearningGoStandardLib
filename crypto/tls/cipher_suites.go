@@ -20,40 +20,51 @@ import (
 
 // a keyAgreement implements the client and server side of a TLS key agreement
 // protocol by generating and processing key exchange messages.
+// [Min] 秘钥交换接口
 type keyAgreement interface {
 	// On the server side, the first two methods are called in order.
 
 	// In the case that the key agreement protocol doesn't use a
 	// ServerKeyExchange message, generateServerKeyExchange can return nil,
 	// nil.
+	// [Min] 服务端用来生成秘钥交换信息
 	generateServerKeyExchange(*Config, *Certificate, *clientHelloMsg, *serverHelloMsg) (*serverKeyExchangeMsg, error)
+	// [Min] 服务端用来处理客户端的秘钥交换信息
 	processClientKeyExchange(*Config, *Certificate, *clientKeyExchangeMsg, uint16) ([]byte, error)
 
 	// On the client side, the next two methods are called in order.
 
 	// This method may not be called if the server doesn't send a
 	// ServerKeyExchange message.
+	// [Min] 客户端用来处理服务端秘钥交换信息
 	processServerKeyExchange(*Config, *clientHelloMsg, *serverHelloMsg, *x509.Certificate, *serverKeyExchangeMsg) error
+	// [Min] 客户端用来生成秘钥交换信息
 	generateClientKeyExchange(*Config, *clientHelloMsg, *x509.Certificate) ([]byte, *clientKeyExchangeMsg, error)
 }
 
+// [Min] 密码套件的相关 flag 标志
 const (
 	// suiteECDH indicates that the cipher suite involves elliptic curve
 	// Diffie-Hellman. This means that it should only be selected when the
 	// client indicates that it supports ECC with a curve and point format
 	// that we're happy with.
+	// [Min] 套件中使用了 ECDHE 秘钥交换算法
 	suiteECDHE = 1 << iota
 	// suiteECDSA indicates that the cipher suite involves an ECDSA
 	// signature and therefore may only be selected when the server's
 	// certificate is ECDSA. If this is not set then the cipher suite is
 	// RSA based.
+	// [Min] 套件中使用了 ECDSA 签名算法
 	suiteECDSA
+	// [Min] 套件只支持 TLS 1.2
 	// suiteTLS12 indicates that the cipher suite should only be advertised
 	// and accepted when using TLS 1.2.
 	suiteTLS12
+	// [Min] 套件使用 SHA384 作为握手的 hash
 	// suiteSHA384 indicates that the cipher suite uses SHA384 as the
 	// handshake hash.
 	suiteSHA384
+	// [Min] 套件已经默认为不可用
 	// suiteDefaultOff indicates that this cipher suite is not included by
 	// default.
 	suiteDefaultOff
@@ -61,8 +72,9 @@ const (
 
 // A cipherSuite is a specific combination of key agreement, cipher and MAC
 // function. All cipher suites currently assume RSA key agreement.
+// [Min] 密码套件
 type cipherSuite struct {
-	id uint16
+	id uint16 // [Min] 套件 id
 	// the lengths, in bytes, of the key material needed for each component.
 	keyLen int
 	macLen int
@@ -109,6 +121,7 @@ func cipherRC4(key, iv []byte, isRead bool) interface{} {
 	return cipher
 }
 
+// [Min] CBC_3DES 加解密
 func cipher3DES(key, iv []byte, isRead bool) interface{} {
 	block, _ := des.NewTripleDESCipher(key)
 	if isRead {
@@ -117,6 +130,7 @@ func cipher3DES(key, iv []byte, isRead bool) interface{} {
 	return cipher.NewCBCEncrypter(block, iv)
 }
 
+// [Min] CBC_AES 加解密
 func cipherAES(key, iv []byte, isRead bool) interface{} {
 	block, _ := aes.NewCipher(key)
 	if isRead {
@@ -126,6 +140,7 @@ func cipherAES(key, iv []byte, isRead bool) interface{} {
 }
 
 // macSHA1 returns a macFunction for the given protocol version.
+// [Min] HMAC - SHA1
 func macSHA1(version uint16, key []byte) macFunction {
 	if version == VersionSSL30 {
 		mac := ssl30MAC{
@@ -140,6 +155,7 @@ func macSHA1(version uint16, key []byte) macFunction {
 
 // macSHA256 returns a SHA-256 based MAC. These are only supported in TLS 1.2
 // so the given version is ignored.
+// [Min] HMAC - SHA256
 func macSHA256(version uint16, key []byte) macFunction {
 	return tls10MAC{hmac.New(sha256.New, key)}
 }

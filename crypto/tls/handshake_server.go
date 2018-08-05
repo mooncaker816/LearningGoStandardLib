@@ -110,6 +110,8 @@ func (c *Conn) serverHandshake() error {
 			return err
 		}
 		c.clientFinishedIsFirst = true
+		// [Min] 之前已经调用过一次 flush，缓存写入模式已经关闭，
+		// [Min] 我们需要重启缓存写入模式
 		c.buffering = true
 		// [Min] 根据当前的 sessionState，制作 sessionTicket 发给客户端，以备后用
 		if err := hs.sendSessionTicket(); err != nil {
