@@ -14,6 +14,7 @@
 | crypto/sha1    |  Yes     |2018-07-19 |
 | crypto/sha256  |  Yes     |2018-07-20 |
 | crypto/sha512  |  Yes     |2018-07-20 |
+| crypto/tls     |  Yes     |2018-08-05 |
 | encoding/binary|  Yes     |2018-07-18 |
 | encoding/hex   |  Yes     |2018-06-25 |
 | encoding/json  |  ^ decode/stream      |2018-07-16 |
