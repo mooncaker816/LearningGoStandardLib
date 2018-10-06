@@ -1,9 +1,12 @@
 完成情况：
-
+ 
 | 包名           | 完成     |时间       |
 |----------------|:--------:|:---------:|
 | bufio          |  Yes     |2018-01-10 |
 | bytes          |  Yes     |2018-01-14 |
+| container/heap |  Yes     |2018-10-05 |
+| container/list |  Yes     |2018-10-06 |
+| container/ring |  Yes     |2018-10-06 |
 | context        |  Yes     |2018-07-12 |
 | crypto         |  Yes     |2018-07-19 |
 | crypto/aes     |  Yes     |2018-07-25 |
