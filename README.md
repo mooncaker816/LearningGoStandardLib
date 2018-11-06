@@ -29,6 +29,7 @@
 | net/url        |  Yes     |2018-06-28 |
 | path           |  Yes     |2018-06-26 |
 | path/filepath  |  Yes     |2018-06-26 |
+| runtime/chan.go           |  Yes     |2018-11-06 |
 | sort           |  Yes     |2018-06-27 |
 | strconv        |  No      |           |
 | strings        |  Yes     |2018-01-15 |
