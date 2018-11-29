@@ -27,12 +27,15 @@
 | net/http       |  ^ filetransport/h2_bundle     |2018-07-12 |
 | net/textproto  |  Yes     |2018-07-03 |
 | net/url        |  Yes     |2018-06-28 |
+| os/env.go        |  Yes     |2018-11-29 |
 | path           |  Yes     |2018-06-26 |
 | path/filepath  |  Yes     |2018-06-26 |
 | runtime/chan.go           |  Yes     |2018-11-06 |
+| runtime/select.go           |  Yes     |2018-11-07 |
 | sort           |  Yes     |2018-06-27 |
 | strconv        |  No      |           |
 | strings        |  Yes     |2018-01-15 |
+| syscall/env_unix.go        |  Yes     |2018-11-29 |
 | text/scanner   |  Yes     |2018-01-09 |
 | unicode        |  Yes     |2018-07-17 |
 | unicode/utf8   |  Yes     |2018-07-18 |
