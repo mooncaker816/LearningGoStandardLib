@@ -73,7 +73,9 @@ func goargs() {
 	}
 }
 
-// [Min] 深度拷贝系统环境变量至 runtime 包级变量 envs 中，供 os 包中与环境变量相关的代码使用
+// [Min] 深度拷贝系统环境变量至 runtime 包级变量 envs 中，
+// [Min] 再通过 syscall_runtime_envs 返回拷贝给 os 包中的 envs
+// [Min] 从而在拷贝的环境变量的基础上，支持环境变量的查询与修改
 func goenvs_unix() {
 	// TODO(austin): ppc64 in dynamic linking mode doesn't
 	// guarantee env[] will immediately follow argv. Might cause

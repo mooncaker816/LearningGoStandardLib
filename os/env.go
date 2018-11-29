@@ -119,6 +119,9 @@ func getShellName(s string) (string, int) {
 // [Min] 如果需要区分不同的空值，则需要调用 LookupEnv 函数
 func Getenv(key string) string {
 	testlog.Getenv(key)
+	// [Min] runtime 会对系统的环境变量作一次字符串层面的深度拷贝，
+	// [Min] 然后再返回字符串的拷贝给 syscall 包级变量 envs
+	// [Min] 所有之后对环境变量的操作都是在这个基础上进行的
 	v, _ := syscall.Getenv(key)
 	return v
 }
